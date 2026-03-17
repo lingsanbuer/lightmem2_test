@@ -1,4 +1,10 @@
-import type { RuntimeTurnContext, RuntimeTurnResult, UsageSnapshot } from "./types.js";
+import type {
+  PersistedSessionMeta,
+  PersistedTurnRecord,
+  RuntimeTurnContext,
+  RuntimeTurnResult,
+  UsageSnapshot,
+} from "./types.js";
 
 export type RuntimeModule = {
   name: string;
@@ -25,4 +31,10 @@ export type MemoryGraph = {
 
 export type MetricsSink = {
   emit(event: string, payload: Record<string, unknown>): Promise<void>;
+};
+
+export type RuntimeStateStore = {
+  appendTurn(record: PersistedTurnRecord): Promise<void>;
+  upsertSessionMeta(sessionId: string, update: Partial<PersistedSessionMeta>): Promise<PersistedSessionMeta>;
+  writeSummary(sessionId: string, summary: string, source: string): Promise<void>;
 };

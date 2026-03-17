@@ -10,7 +10,8 @@
                     "typecheck":  "tsc -p tsconfig.json --noEmit"
                 },
     "dependencies":  {
-                         "@ecoclaw/kernel":  "workspace:*"
+                         "@ecoclaw/kernel":  "workspace:*",
+                         "@ecoclaw/storage-fs":  "workspace:*"
                      }
 }
 

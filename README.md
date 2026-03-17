@@ -21,5 +21,6 @@ This avoids coupling cache stability to evolving cross-session memory too early.
 - `packages/modules/*`: pluggable runtime modules
 - `packages/providers/*`: provider-specific cache + usage adapters
 - `packages/connectors/openclaw`: OpenClaw hook bridge
+- `packages/storage/fs`: filesystem-backed runtime state store
 - `packages/observability`: metrics sink primitives
 - `apps/lab-bench`: replay + A/B harness scaffold

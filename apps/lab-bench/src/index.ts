@@ -1,20 +1,21 @@
-import { RuntimePipeline } from "@ecoclaw/kernel";
 import { createCacheModule } from "@ecoclaw/module-cache";
 import { createSummaryModule } from "@ecoclaw/module-summary";
 import { createCompressionModule } from "@ecoclaw/module-compression";
 import { openaiAdapter } from "@ecoclaw/provider-openai";
+import { createOpenClawConnector } from "@ecoclaw/connector-openclaw";
 
 async function main() {
-  const pipeline = new RuntimePipeline({
+  const connector = createOpenClawConnector({
     modules: [
       createCacheModule(),
       createSummaryModule({ idleTriggerMinutes: 50 }),
       createCompressionModule({ maxToolChars: 300 }),
     ],
     adapters: { openai: openaiAdapter },
+    stateDir: "D:/openclaw-context-runtime/.state",
   });
 
-  const result = await pipeline.run(
+  const result = await connector.onLlmCall(
     {
       sessionId: "s1",
       sessionMode: "single",
@@ -39,7 +40,10 @@ async function main() {
     }),
   );
 
+  await connector.writeSessionSummary("s1", "This is a sample persisted summary.", "bench");
+
   console.log("Pipeline sample done", result.usage);
+  console.log("State root:", connector.getStateRootDir());
 }
 
 main().catch((err) => {

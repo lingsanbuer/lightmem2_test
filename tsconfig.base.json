@@ -44,6 +44,9 @@
                                                                       ],
                                           "@ecoclaw/observability":  [
                                                                      "packages/observability/src/index.ts"
+                                                                 ],
+                                          "@ecoclaw/storage-fs":  [
+                                                                     "packages/storage/fs/src/index.ts"
                                                                  ]
                                       },
                             "types":  [

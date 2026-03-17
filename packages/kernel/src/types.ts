@@ -38,3 +38,28 @@ export type RuntimeTurnResult = {
   usage?: UsageSnapshot;
   metadata?: Record<string, unknown>;
 };
+
+export type PersistedTurnRecord = {
+  turnId: string;
+  sessionId: string;
+  provider: string;
+  model: string;
+  prompt: string;
+  segments: ContextSegment[];
+  usage?: UsageSnapshot;
+  responsePreview: string;
+  startedAt: string;
+  endedAt: string;
+  status: "ok" | "error";
+  error?: string;
+};
+
+export type PersistedSessionMeta = {
+  sessionId: string;
+  createdAt: string;
+  updatedAt: string;
+  provider?: string;
+  model?: string;
+  lastStatus?: "ok" | "error";
+  turnCount: number;
+};
