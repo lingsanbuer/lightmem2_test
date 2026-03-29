@@ -4,3 +4,4 @@ export * from "./interfaces.js";
 export * from "./events.js";
 export * from "./pipeline.js";
 export * from "./scheduler.js";
+export * from "./segments.js";

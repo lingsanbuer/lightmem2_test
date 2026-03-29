@@ -63,27 +63,20 @@ export function createMemoryStateModule(cfg: MemoryStateModuleConfig = {}): Runt
       if (events.length === 0) return result;
       const latest = events[events.length - 1];
       const payload = latest.payload as Record<string, unknown> | undefined;
-      const rawSummary = String(payload?.summaryText ?? "");
+      const artifact = (payload?.artifact ?? {}) as Record<string, unknown>;
+      const rawSummary = String(artifact.summaryText ?? "");
       const summaryText = rawSummary.length > maxSummaryChars
         ? `${rawSummary.slice(0, maxSummaryChars)}\n...[truncated]`
         : rawSummary;
-      const recentMessages = Array.isArray(payload?.recentMessages)
-        ? (payload?.recentMessages as Array<{
+      const recentMessages = Array.isArray(artifact.recentMessages)
+        ? (artifact.recentMessages as Array<{
             index?: number;
             at?: string;
             user?: string;
             assistant?: string;
           }>)
         : [];
-      const recentMessagesText = recentMessages
-        .map(
-          (item, idx) =>
-            `[${item.index ?? idx + 1}] ${item.at ?? ""}\nUSER: ${item.user ?? ""}\nASSISTANT: ${item.assistant ?? ""}`,
-        )
-        .join("\n\n");
-      const seedText = recentMessagesText
-        ? `${summaryText}\n\n## Recent Raw Messages\n${recentMessagesText}`
-        : summaryText;
+      const seedText = summaryText;
       const updatedAt = new Date().toISOString();
       stateBySession.set(ctx.sessionId, {
         seedText,

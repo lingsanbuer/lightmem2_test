@@ -1,20 +1,21 @@
 import {
-  createCacheModule,
-  createCompactionTriggerModule,
+  createStabilizerModule,
+  createCompactionModule,
   createSummaryModule,
-  createCompressionModule,
+  createReductionModule,
 } from "@ecoclaw/layer-execution";
 import { createTaskRouterModule, createPolicyModule, createDecisionLedgerModule } from "@ecoclaw/layer-decision";
 import { createMemoryStateModule } from "@ecoclaw/layer-data";
+import { createObservationSegment } from "@ecoclaw/kernel";
 import { openaiAdapter } from "@ecoclaw/provider-openai";
 import { createOpenClawConnector } from "@ecoclaw/layer-orchestration";
+import { resolveSummaryModuleConfig } from "./summary-config.js";
 
 async function main() {
   const connector = createOpenClawConnector({
     modules: [
-      createCacheModule({ minPrefixChars: 10 }),
+      createStabilizerModule({ minPrefixChars: 10 }),
       createPolicyModule({ summaryTriggerStableChars: 20 }),
-      createCompactionTriggerModule(),
       createTaskRouterModule({
         enabled: true,
         tierRoutes: {
@@ -25,8 +26,9 @@ async function main() {
       }),
       createDecisionLedgerModule(),
       createMemoryStateModule({ maxSummaryChars: 600 }),
-      createSummaryModule({ idleTriggerMinutes: 50 }),
-      createCompressionModule({ maxToolChars: 300 }),
+      createCompactionModule(),
+      createSummaryModule(resolveSummaryModuleConfig({ idleTriggerMinutes: 50 })),
+      createReductionModule({ maxToolChars: 300 }),
     ],
     adapters: { openai: openaiAdapter },
     stateDir: "/tmp/ecoclaw-lab-state",
@@ -77,10 +79,47 @@ async function main() {
       segments: [
         { id: "a2", kind: "stable", text: "system prompt stable block", priority: 1 },
         { id: "b2", kind: "volatile", text: "latest user turn", priority: 10 },
+        createObservationSegment({
+          id: "tool-json-1",
+          text: JSON.stringify(
+            {
+              files: [
+                { path: "src/app.ts", lines: 120, status: "modified" },
+                { path: "src/cache.ts", lines: 420, status: "unchanged" },
+              ],
+              summary: "workspace diff snapshot",
+              stdout: "scan complete",
+            },
+            null,
+            2,
+          ),
+          source: "lab-bench",
+          toolName: "workspace-scan",
+          payloadKind: "json",
+        }),
       ],
       budget: { maxInputTokens: 8000, reserveOutputTokens: 1000 },
       metadata: {
         logicalSessionId: "tui-logical-s1",
+        turnObservations: [
+          {
+            id: "tool-stdout-1",
+            text: [
+              "stdout:",
+              "scan start",
+              "checked src/index.ts",
+              "checked src/cache.ts",
+              "checked src/router.ts",
+              "checked src/ui.ts",
+              "checked docs/architecture.md",
+              "checked README.md",
+              "scan complete",
+            ].join("\n"),
+            payloadKind: "stdout",
+            toolName: "workspace-scan",
+            source: "metadata.turnObservations",
+          },
+        ],
       },
     },
     async () => ({
@@ -116,8 +155,8 @@ async function main() {
   );
   console.log("Summary meta:", (result.metadata as Record<string, unknown>)?.summary);
   console.log(
-    "FinalContext cache/policy:",
-    (result.metadata as Record<string, any>)?.ecoclawTrace?.finalContext?.metadata?.cache,
+    "FinalContext stabilizer/policy:",
+    (result.metadata as Record<string, any>)?.ecoclawTrace?.finalContext?.metadata?.stabilizer,
     (result.metadata as Record<string, any>)?.ecoclawTrace?.finalContext?.metadata?.policy,
   );
   console.log("State root:", connector.getStateRootDir());

@@ -6,7 +6,9 @@
     "scripts": {
         "build": "pnpm -r build",
         "typecheck": "pnpm -r typecheck",
-        "dev:bench": "pnpm --filter @ecoclaw/lab-bench dev"
+        "dev:bench": "pnpm --filter @ecoclaw/lab-bench dev",
+        "plugin:pack:release": "npm --prefix packages/openclaw-plugin run pack:release",
+        "plugin:install:release": "npm --prefix packages/openclaw-plugin run install:release"
     },
     "devDependencies": {
         "typescript": "^5.9.3",

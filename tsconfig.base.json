@@ -21,9 +21,6 @@
                                           "@ecoclaw/provider-anthropic":  [
                                                                           "packages/providers/anthropic/src/index.ts"
                                                                       ],
-                                          "@ecoclaw/provider-relay":  [
-                                                                      "packages/providers/relay/src/index.ts"
-                                                                  ],
                                           "@ecoclaw/layer-data": [
                                                                       "packages/layers/data/src/index.ts"
                                                                   ],
@@ -36,9 +33,6 @@
                                           "@ecoclaw/layer-orchestration": [
                                                                               "packages/layers/orchestration/src/index.ts"
                                                                           ],
-                                          "@ecoclaw/observability":  [
-                                                                     "packages/observability/src/index.ts"
-                                                                 ],
                                           "@ecoclaw/storage-fs":  [
                                                                      "packages/storage/fs/src/index.ts"
                                                                  ]

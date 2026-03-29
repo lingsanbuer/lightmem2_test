@@ -15,6 +15,7 @@ export type ContextSegment = {
   text: string;
   priority: number;
   source?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type RuntimeBudget = {
@@ -54,6 +55,7 @@ export type RuntimeTurnTrace = {
       priority: number;
       source?: string;
       text: string;
+      metadata?: Record<string, unknown>;
     }>;
     metadata?: Record<string, unknown>;
   };

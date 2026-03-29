@@ -20,26 +20,26 @@ Physical package layout now mirrors the semantic layers:
 ### Data Layer
 
 - `module-memory-state`: short/medium-term session state snapshots.
-- `module-retrieval`: retrieval hooks for task-relevant context.
+- `module-retrieval`: reserved boundary for future retrieval wiring; currently a light metadata placeholder.
 
 ### Decision Layer
 
-- `module-policy`: static thresholds and rules (TTL, jitter, probe, summary trigger).
-- `module-task-router`: deterministic route/tier selection with confidence.
+- `module-policy`: static thresholds and rules (TTL, jitter, probe, summary trigger, compaction trigger).
+- `module-task-router`: deterministic route/tier selection with confidence; currently used in bench/demo hosts, not the production plugin path.
 - `module-decision-ledger`: records per-turn decision/evidence/outcome/ROI.
 
 ### Execution Layer
 
-- `module-cache`: prefix-matching candidate evaluation + cache tree registration.
-- `module-compaction-trigger`: static compaction recommendation trigger (responses-first).
-- `module-summary`: builds summary artifacts when requested.
-- `module-compression`: response/tool-content shaping for budget control.
+- `module-stabilizer`: prefix stabilization, candidate evaluation, and cache-tree registration.
+- `module-summary`: builds handoff summary artifacts when requested by policy.
+- `module-compaction`: converts a summary artifact into a concrete compaction plan.
+- `module-reduction`: response/tool-content reduction and pruning for budget control.
 
 ### Orchestration Layer
 
 - `layer-orchestration`: OpenClaw logical/physical session routing, optional policy-driven fork, persistence.
 
-### Observability (cross-cutting)
+### Observability (cross-cutting, not a standalone package)
 
 - Kernel runtime events (`ecoclawEvents`) and trace (`ecoclawTrace`).
 - Event trace JSONL and session `turns.jsonl` persisted to filesystem.
@@ -63,6 +63,11 @@ Current production path is OpenClaw plugin first:
    (policy/cache/probe/compaction/summarization signals).
 4. Runtime events are persisted and visualized via the lab dashboard.
 
+Current plugin runtime intentionally stays minimal:
+
+- enabled by default: `stabilizer`, `reduction`, `decision-ledger`
+- not yet wired into production plugin path: `summary`, `compaction`, `memory-state`, `task-router`, `retrieval`
+
 This keeps provider-routing behavior inside plugin deployment scope
 without requiring OpenClaw core source patches.
 
@@ -79,5 +84,5 @@ EcoClaw persistence (filesystem-first):
 ## Next Milestones
 
 - L1.1: task-router + policy decision replay for offline tuning.
-- L1.2: compaction module (separate from summary artifact generation).
+- L1.2: orchestration-side compaction execution refinements on top of the new plan boundary.
 - L2+: learned/dynamic policies (optional, gated by offline metrics quality).

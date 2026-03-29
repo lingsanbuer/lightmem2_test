@@ -1,0 +1,88 @@
+import type { RuntimeTurnContext, RuntimeTurnResult } from "@ecoclaw/kernel";
+
+export type BuiltinReductionPassId =
+  | "tool_payload_trim"
+  | "format_slimming"
+  | "semantic_llmlingua2";
+
+export type ReductionPassId = BuiltinReductionPassId | (string & {});
+export type ReductionPhase = "before_call" | "after_call";
+
+export type ReductionTarget =
+  | "result_content"
+  | "tool_payload"
+  | "structured_payload"
+  | "context_segment"
+  | (string & {});
+
+export type ReductionPassSpec = {
+  id: ReductionPassId;
+  enabled?: boolean;
+  phase?: ReductionPhase;
+  target?: ReductionTarget;
+  options?: Record<string, unknown>;
+};
+
+export type ReductionBeforeCallContext = {
+  turnCtx: RuntimeTurnContext;
+  spec: ReductionPassSpec;
+};
+
+export type ReductionBeforeCallOutcome = {
+  changed: boolean;
+  turnCtx?: RuntimeTurnContext;
+  note?: string;
+  skippedReason?: string;
+  metadata?: Record<string, unknown>;
+  touchedSegmentIds?: string[];
+};
+
+export type ReductionAfterCallContext = {
+  turnCtx: RuntimeTurnContext;
+  originalResult: RuntimeTurnResult;
+  currentResult: RuntimeTurnResult;
+  spec: ReductionPassSpec;
+};
+
+export type ReductionAfterCallOutcome = {
+  changed: boolean;
+  result?: RuntimeTurnResult;
+  note?: string;
+  skippedReason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type ReductionPassHandler = {
+  beforeCall?(
+    ctx: ReductionBeforeCallContext,
+  ): Promise<ReductionBeforeCallOutcome> | ReductionBeforeCallOutcome;
+  afterCall?(
+    ctx: ReductionAfterCallContext,
+  ): Promise<ReductionAfterCallOutcome> | ReductionAfterCallOutcome;
+};
+
+export type ReductionPassRegistry = Partial<Record<ReductionPassId, ReductionPassHandler>>;
+
+export type ReductionReportEntry = {
+  id: ReductionPassId;
+  phase: ReductionPhase;
+  target: ReductionTarget;
+  changed: boolean;
+  note?: string;
+  skippedReason?: string;
+  beforeChars: number;
+  afterChars: number;
+  touchedSegmentIds?: string[];
+};
+
+export type ReductionMetadata = {
+  beforeCall?: ReductionReportEntry[];
+  afterCall?: ReductionReportEntry[];
+};
+
+export type ReductionModuleConfig = {
+  passes?: ReductionPassSpec[];
+  registry?: ReductionPassRegistry;
+  maxToolChars?: number;
+  strategy?: "rule" | "llmlingua2";
+};

@@ -4,6 +4,7 @@ import type {
   ModuleScheduler,
   ProviderAdapter,
   RuntimeModule,
+  RuntimeModuleRuntime,
 } from "./interfaces.js";
 import { resolveApiFamily } from "./api-family.js";
 import type { RuntimeTurnContext, RuntimeTurnResult, RuntimeTurnTraceStep } from "./types.js";
@@ -33,6 +34,26 @@ export class RuntimePipeline {
       ? await this.cfg.moduleScheduler.selectModules(seededCtx, this.cfg.modules)
       : defaultSchedule;
     const activeModules = schedule.modules;
+    const runtime: RuntimeModuleRuntime = {
+      callModel: async (subCtx, options = {}) => {
+        const seededSubCtx: RuntimeTurnContext = {
+          ...subCtx,
+          apiFamily: resolveApiFamily(subCtx),
+        };
+        const annotatePrompt = options.annotatePrompt ?? true;
+        const normalizeUsage = options.normalizeUsage ?? true;
+        const subAdapter = this.cfg.adapters[seededSubCtx.provider];
+        const preparedCtx =
+          annotatePrompt && subAdapter
+            ? await subAdapter.annotatePrompt(seededSubCtx)
+            : seededSubCtx;
+        const subResult = await invokeModel(preparedCtx);
+        if (normalizeUsage && subAdapter && subResult.usage?.providerRaw) {
+          subResult.usage = subAdapter.normalizeUsage(subResult.usage.providerRaw);
+        }
+        return subResult;
+      },
+    };
 
     const pushStep = (
       stage: RuntimeTurnTraceStep["stage"],
@@ -53,7 +74,7 @@ export class RuntimePipeline {
     let current = seededCtx;
     for (const mod of activeModules) {
       if (mod.beforeBuild) {
-        current = await mod.beforeBuild(current);
+        current = await mod.beforeBuild(current, runtime);
         pushStep("beforeBuild", mod.name, current);
       }
     }
@@ -66,7 +87,7 @@ export class RuntimePipeline {
 
     for (const mod of activeModules) {
       if (mod.beforeCall) {
-        current = await mod.beforeCall(current);
+        current = await mod.beforeCall(current, runtime);
         pushStep("beforeCall", mod.name, current);
       }
     }
@@ -77,6 +98,7 @@ export class RuntimePipeline {
       priority: s.priority,
       source: s.source,
       text: s.text,
+      metadata: s.metadata,
     }));
     const renderedPromptText = requestSegments
       .map((s) => `[${s.kind}|p${s.priority}|${s.id}]${s.source ? `(${s.source})` : ""}\n${s.text}`)
@@ -87,7 +109,7 @@ export class RuntimePipeline {
 
     for (const mod of [...activeModules].reverse()) {
       if (mod.afterCall) {
-        result = await mod.afterCall(current, result);
+        result = await mod.afterCall(current, result, runtime);
         pushStep("afterCall", mod.name, current, result.content.length);
       }
     }

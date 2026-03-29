@@ -13,12 +13,26 @@ It includes:
 - Session topology + `/ecoclaw` command controls
 - JSONL event tracing for analysis
 
-## 1) Install And Enable
+## 1) Release Install And Enable
 
 ```bash
 cd packages/openclaw-plugin
-npm run build
-openclaw plugins install .
+npm run install:release
+```
+
+Or in two explicit steps:
+
+```bash
+cd packages/openclaw-plugin
+npm run pack:release
+openclaw plugins install ./ecoclaw-*.tgz
+openclaw gateway restart
+```
+
+This is the recommended end-user path. It installs EcoClaw into:
+
+```text
+~/.openclaw/extensions/ecoclaw
 ```
 
 Recommended trusted plugin allowlist:
@@ -29,7 +43,22 @@ openclaw config set plugins.entries.ecoclaw.enabled true
 openclaw gateway restart
 ```
 
-## 2) Supported Plugin Config
+## 2) Development-Mode Install
+
+If you are iterating on plugin source directly, use a load-path install instead:
+
+```bash
+openclaw config set plugins.load.paths "[\"/abs/path/to/EcoClaw/packages/openclaw-plugin\"]"
+openclaw config set plugins.allow "[\"ecoclaw\"]"
+openclaw config set plugins.entries.ecoclaw.enabled true
+openclaw gateway restart
+```
+
+Do not keep release install and dev load-path active at the same time. They use
+the same plugin id (`ecoclaw`) and OpenClaw will report duplicate plugin
+sources.
+
+## 3) Supported Plugin Config
 
 ```bash
 openclaw config set plugins.entries.ecoclaw.config.stateDir "$HOME/.openclaw/ecoclaw-plugin-state"
@@ -59,7 +88,7 @@ Valid config keys are only:
 - `proxyAutostart`
 - `proxyPort`
 
-## 3) Model Selection
+## 4) Model Selection
 
 In OpenClaw, use explicit EcoClaw provider models:
 
@@ -70,7 +99,7 @@ ecoclaw/gpt-5.4
 The plugin auto-starts an embedded proxy and syncs explicit model aliases into
 `~/.openclaw/openclaw.json` when possible.
 
-## 4) How Cache Reuse Works
+## 5) How Cache Reuse Works
 
 For the default Responses path, EcoClaw does not rely on `previous_response_id`
 to force cross-task reuse. The stable hit comes from keeping the cacheable
@@ -83,7 +112,7 @@ prefix byte-identical across requests:
 Once one request warms that normalized prefix, later same-session turns and
 forked first turns land in the same upstream cache partition and can reuse it.
 
-## 5) Commands
+## 6) Commands
 
 Use slash commands in TUI:
 
@@ -98,7 +127,7 @@ Use slash commands in TUI:
 
 You can also type inline form (`ecoclaw status`), but slash form is preferred.
 
-## 6) Runtime Files
+## 7) Runtime Files
 
 Default state directory:
 
@@ -113,7 +142,7 @@ Important files:
 - `response-root-state.json`: root-link metadata cache
 - `sessions/<logical>/turns.jsonl`: logical session turn history
 
-## 7) Acceptance Test
+## 8) Acceptance Test
 
 Run the built-in cache acceptance harness:
 
@@ -138,11 +167,11 @@ The harness:
 
 Outputs are written under `packages/openclaw-plugin/.tmp/cache-acceptance/`.
 
-## 8) Dashboard
+## 9) Dashboard
 
 ```bash
 cd apps/lab-bench
-ECOCLAW_STATE_DIR="$HOME/.openclaw/ecoclaw-plugin-state" npm run web:cachetree
+corepack pnpm --filter @ecoclaw/lab-bench dev
 ```
 
 Open `http://127.0.0.1:7777` to inspect runtime decisions and compaction ROI.

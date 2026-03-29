@@ -2,7 +2,6 @@ import {
   ECOCLAW_EVENT_TYPES,
   appendContextEvent,
   appendResultEvent,
-  findRuntimeEventsByType,
   resolveApiFamily,
   type RuntimeTurnContext,
   type RuntimeModule,
@@ -11,7 +10,13 @@ import {
 export type PolicyModuleConfig = {
   summaryTriggerInputTokens?: number;
   summaryTriggerStableChars?: number;
-  ttlSoonSeconds?: number;
+  compactionEnabled?: boolean;
+  compactionTriggerInputTokens?: number;
+  compactionTriggerTurnCount?: number;
+  compactionMissRateThreshold?: number;
+  compactionMissRateWindowTurns?: number;
+  compactionMinTurnsForMissRate?: number;
+  compactionCooldownTurns?: number;
   cacheJitterWindowTurns?: number;
   cacheMissRateThreshold?: number;
   minTurnsBeforeJitter?: number;
@@ -27,7 +32,13 @@ export type PolicyModuleConfig = {
 export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule {
   const summaryTriggerInputTokens = Math.max(0, cfg.summaryTriggerInputTokens ?? 20000);
   const summaryTriggerStableChars = Math.max(0, cfg.summaryTriggerStableChars ?? 0);
-  const ttlSoonSeconds = Math.max(10, cfg.ttlSoonSeconds ?? 120);
+  const compactionEnabled = cfg.compactionEnabled ?? true;
+  const compactionTriggerInputTokens = Math.max(0, cfg.compactionTriggerInputTokens ?? 120000);
+  const compactionTriggerTurnCount = Math.max(1, cfg.compactionTriggerTurnCount ?? 18);
+  const compactionMissRateThreshold = Math.min(1, Math.max(0, cfg.compactionMissRateThreshold ?? 0.7));
+  const compactionMissRateWindowTurns = Math.max(3, cfg.compactionMissRateWindowTurns ?? 8);
+  const compactionMinTurnsForMissRate = Math.max(1, cfg.compactionMinTurnsForMissRate ?? 6);
+  const compactionCooldownTurns = Math.max(0, cfg.compactionCooldownTurns ?? 6);
   const cacheJitterWindowTurns = Math.max(3, cfg.cacheJitterWindowTurns ?? 6);
   const cacheMissRateThreshold = Math.min(1, Math.max(0, cfg.cacheMissRateThreshold ?? 0.5));
   const minTurnsBeforeJitter = Math.max(1, cfg.minTurnsBeforeJitter ?? 4);
@@ -44,6 +55,7 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
     {
       turn: number;
       lastSummaryRequestTurn?: number;
+      lastCompactionRequestTurn?: number;
       recentCacheReadHit: number[];
       cumulativeInputTokens: number;
       probe: {
@@ -90,30 +102,29 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
         .filter((s) => s.kind === "stable")
         .map((s) => s.text)
         .join("\n").length;
-      const cacheMeta = (ctx.metadata?.cache as Record<string, unknown> | undefined) ?? {};
-      const cacheEligible = Boolean(cacheMeta.eligible);
-      const treeMeta = (cacheMeta.tree as Record<string, unknown> | undefined) ?? {};
-      const selectedCandidate = Array.isArray(treeMeta.candidates) ? treeMeta.candidates[0] : undefined;
-      const selectedExpiresAt = (selectedCandidate as Record<string, unknown> | undefined)?.expiresAt;
-      const expiresSoon =
-        typeof selectedExpiresAt === "string"
-          ? new Date(selectedExpiresAt).getTime() - Date.now() <= ttlSoonSeconds * 1000
-          : false;
+      const stabilizerMeta = (ctx.metadata?.stabilizer as Record<string, unknown> | undefined) ?? {};
+      const stabilizerEligible = Boolean(stabilizerMeta.eligible);
 
-      const recent = state.recentCacheReadHit.slice(-cacheJitterWindowTurns);
+      const recent = state.recentCacheReadHit.slice(-Math.max(cacheJitterWindowTurns, compactionMissRateWindowTurns));
+      const jitterRecent = recent.slice(-cacheJitterWindowTurns);
       const missCount = recent.filter((v) => v === 0).length;
-      const missRate = recent.length > 0 ? missCount / recent.length : 0;
+      const missRate = jitterRecent.length > 0 ? jitterRecent.filter((v) => v === 0).length / jitterRecent.length : 0;
       const jitterTriggered =
         state.turn >= minTurnsBeforeJitter &&
-        recent.length >= Math.min(cacheJitterWindowTurns, minTurnsBeforeJitter) &&
+        jitterRecent.length >= Math.min(cacheJitterWindowTurns, minTurnsBeforeJitter) &&
         missRate >= cacheMissRateThreshold;
+      const compactionRecent = recent.slice(-compactionMissRateWindowTurns);
+      const compactionMissRate =
+        compactionRecent.length > 0
+          ? compactionRecent.filter((v) => v === 0).length / compactionRecent.length
+          : 0;
 
       const lastProbeAtMs = state.probe.lastProbeAtMs;
       const probeSupported = apiFamily !== "openai-completions";
       const probeDue =
         cacheProbeEnabled &&
         probeSupported &&
-        cacheEligible &&
+        stabilizerEligible &&
         (lastProbeAtMs == null || nowMs - lastProbeAtMs >= cacheProbeIntervalSeconds * 1000);
       const promptChars = String(ctx.prompt ?? "").length;
       const probePlanned = probeDue && promptChars <= cacheProbeMaxPromptChars;
@@ -130,27 +141,54 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
       }
       state.probe.mode = probeMode;
 
-      const reasons: string[] = [];
-      if (cacheEligible && summaryTriggerInputTokens > 0 && state.cumulativeInputTokens >= summaryTriggerInputTokens) {
-        reasons.push("input_tokens_threshold");
+      const summaryReasons: string[] = [];
+      if (stabilizerEligible && summaryTriggerInputTokens > 0 && state.cumulativeInputTokens >= summaryTriggerInputTokens) {
+        summaryReasons.push("input_tokens_threshold");
       }
-      if (cacheEligible && summaryTriggerStableChars > 0 && stableChars >= summaryTriggerStableChars) {
-        reasons.push("stable_chars_threshold");
+      if (stabilizerEligible && summaryTriggerStableChars > 0 && stableChars >= summaryTriggerStableChars) {
+        summaryReasons.push("stable_chars_threshold");
       }
-      if (cacheEligible && expiresSoon) {
-        reasons.push("cache_ttl_soon");
+      if (stabilizerEligible && jitterTriggered) {
+        summaryReasons.push("cache_jitter");
       }
-      if (cacheEligible && jitterTriggered) {
-        reasons.push("cache_jitter");
+      if (stabilizerEligible && probeSupported && probeMode === "cold" && !probePlanned) {
+        summaryReasons.push("cache_probe_cold");
       }
-      if (cacheEligible && probeSupported && probeMode === "cold" && !probePlanned) {
-        reasons.push("cache_probe_cold");
-      }
-      const shouldRequestSummary = reasons.length > 0;
-      const cooldownActive =
+      const summaryCooldownActive =
         typeof state.lastSummaryRequestTurn === "number" &&
         state.turn - state.lastSummaryRequestTurn <= requestCooldownTurns;
-      const finalRequest = shouldRequestSummary && !cooldownActive;
+      const compactionSupported = apiFamily === "openai-responses";
+      const compactionReasons: string[] = [];
+      if (
+        compactionSupported &&
+        compactionEnabled &&
+        compactionTriggerInputTokens > 0 &&
+        state.cumulativeInputTokens >= compactionTriggerInputTokens
+      ) {
+        compactionReasons.push("input_tokens_threshold");
+      }
+      if (compactionSupported && compactionEnabled && state.turn >= compactionTriggerTurnCount) {
+        compactionReasons.push("turn_count_threshold");
+      }
+      if (
+        compactionSupported &&
+        compactionEnabled &&
+        state.turn >= compactionMinTurnsForMissRate &&
+        compactionRecent.length >= Math.min(compactionMinTurnsForMissRate, compactionMissRateWindowTurns) &&
+        compactionMissRate >= compactionMissRateThreshold
+      ) {
+        compactionReasons.push("cache_miss_rate_threshold");
+      }
+      const compactionCooldownActive =
+        typeof state.lastCompactionRequestTurn === "number" &&
+        state.turn - state.lastCompactionRequestTurn <= compactionCooldownTurns;
+      const shouldRequestCompaction =
+        compactionSupported &&
+        compactionEnabled &&
+        compactionReasons.length > 0 &&
+        !compactionCooldownActive;
+      const shouldRequestSummary =
+        shouldRequestCompaction || (summaryReasons.length > 0 && !summaryCooldownActive);
 
       const withMeta = {
         ...ctx,
@@ -160,16 +198,29 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
             apiFamily,
             summaryTriggerInputTokens,
             summaryTriggerStableChars,
-            ttlSoonSeconds,
+            compactionEnabled,
+            compactionTriggerInputTokens,
+            compactionTriggerTurnCount,
+            compactionMissRateThreshold,
+            compactionMissRateWindowTurns,
+            compactionMinTurnsForMissRate,
+            compactionCooldownTurns,
             cacheJitterWindowTurns,
             cacheMissRateThreshold,
             stableChars,
             cumulativeInputTokens: state.cumulativeInputTokens,
-            shouldRequestSummary: finalRequest,
-            reasons,
+            shouldRequestSummary,
+            summaryReasons,
             recentCacheMissRate: missRate,
-            cacheExpiresSoon: expiresSoon,
-            cooldownActive,
+            summaryCooldownActive,
+            compaction: {
+              supported: compactionSupported,
+              enabled: compactionEnabled,
+              shouldRequest: shouldRequestCompaction,
+              reasons: compactionReasons,
+              cooldownActive: compactionCooldownActive,
+              missRate: compactionMissRate,
+            },
             cacheProbe: {
               enabled: cacheProbeEnabled,
               supported: probeSupported,
@@ -191,7 +242,7 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
         },
       };
       let nextCtx: RuntimeTurnContext = withMeta;
-      if (cacheEligible && cacheProbeEnabled && probeSupported) {
+      if (stabilizerEligible && cacheProbeEnabled && probeSupported) {
         nextCtx = appendContextEvent(nextCtx, {
           type: ECOCLAW_EVENT_TYPES.POLICY_CACHE_PROBE_DECIDED,
           source: "module-policy",
@@ -217,13 +268,33 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
           payload: {
             missRate,
             missCount,
-            recentWindowSize: recent.length,
+            recentWindowSize: jitterRecent.length,
             threshold: cacheMissRateThreshold,
             apiFamily,
           },
         });
       }
-      if (!finalRequest) {
+      if (shouldRequestCompaction) {
+        state.lastCompactionRequestTurn = state.turn;
+        nextCtx = appendContextEvent(nextCtx, {
+          type: ECOCLAW_EVENT_TYPES.POLICY_COMPACTION_REQUESTED,
+          source: "module-policy",
+          at: new Date().toISOString(),
+          payload: {
+            reasons: compactionReasons,
+            cumulativeInputTokens: state.cumulativeInputTokens,
+            turn: state.turn,
+            missRate: compactionMissRate,
+            inputTokensThreshold: compactionTriggerInputTokens,
+            turnCountThreshold: compactionTriggerTurnCount,
+            missRateThreshold: compactionMissRateThreshold,
+            missRateWindowTurns: compactionMissRateWindowTurns,
+            apiFamily,
+          },
+        });
+      }
+      if (!shouldRequestSummary) {
+        stateBySession.set(ctx.sessionId, state);
         return nextCtx;
       }
       state.lastSummaryRequestTurn = state.turn;
@@ -235,10 +306,11 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
         payload: {
           cumulativeInputTokens: state.cumulativeInputTokens,
           stableChars,
-          reasons,
+          reasons: shouldRequestCompaction
+            ? [...compactionReasons.map((reason) => `compaction_${reason}`), ...summaryReasons]
+            : summaryReasons,
           inputTokensThreshold: summaryTriggerInputTokens,
           threshold: summaryTriggerStableChars,
-          ttlSoonSeconds,
           missRate,
           apiFamily,
         },
@@ -304,19 +376,7 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
         });
       }
 
-      const summaryEvents = findRuntimeEventsByType(result.metadata, ECOCLAW_EVENT_TYPES.SUMMARY_GENERATED);
-      if (summaryEvents.length === 0) return result;
-      const latest = summaryEvents[summaryEvents.length - 1];
-      return appendResultEvent(result, {
-        type: ECOCLAW_EVENT_TYPES.POLICY_FORK_RECOMMENDED,
-        source: "module-policy",
-        at: new Date().toISOString(),
-        payload: {
-          strategy: "fork_from_summary",
-          targetBranch: (latest.payload as Record<string, unknown>)?.targetBranch,
-          apiFamily,
-        },
-      });
+      return result;
     },
   };
 }

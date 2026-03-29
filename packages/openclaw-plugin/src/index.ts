@@ -1,10 +1,22 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { createDecisionLedgerModule, createPolicyModule } from "@ecoclaw/layer-decision";
+import { createMemoryStateModule } from "@ecoclaw/layer-data";
+import {
+  createStabilizerModule,
+  createReductionModule,
+  createSummaryModule,
+  createCompactionModule,
+} from "@ecoclaw/layer-execution";
+import { createOpenClawConnector } from "@ecoclaw/layer-orchestration";
+import { anthropicAdapter } from "@ecoclaw/provider-anthropic";
+import { openaiAdapter } from "@ecoclaw/provider-openai";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { createServer } from "node:http";
 import { readdir, rm } from "node:fs/promises";
 import { readFile, mkdir, appendFile, writeFile } from "node:fs/promises";
+import type { RuntimeTurnContext, RuntimeTurnResult } from "@ecoclaw/kernel";
 
 type EcoClawPluginConfig = {
   enabled?: boolean;
@@ -264,7 +276,7 @@ function normalizeTimestampPrefix(text: string): string {
   const originalPrefix = match[1];
   const rest = raw.slice(match[0].length);
   const stableHead = rest.length > 0 ? `[<TS>] ${rest}` : "[<TS>]";
-  return `${stableHead}\n\n[ecoclaw original timestamp: ${originalPrefix}]`;
+  return `${stableHead}\n\n[<TS>: ${originalPrefix}]`;
 }
 
 function normalizeContentValue(value: any): { value: any; changed: boolean } {
@@ -443,7 +455,7 @@ function rewriteDeveloperPromptForRootLink(developerText: string): DeveloperRewr
   if (agentId) dynamicLines.push(`- AGENT_ID: ${agentId}`);
   const dynamicTail =
     dynamicLines.length > 0
-      ? `\n\n## Dynamic Runtime Context\n${dynamicLines.join("\n")}`
+      ? `\n${dynamicLines.join("\n")}`
       : "";
   return {
     canonicalDeveloperText: canonical,
@@ -455,31 +467,31 @@ function rewriteDeveloperPromptForRootLink(developerText: string): DeveloperRewr
   };
 }
 
-function appendTextToContent(content: any, extraText: string): any {
+function prependTextToContent(content: any, extraText: string): any {
   const extra = String(extraText ?? "").trim();
   if (!extra) return content;
   if (typeof content === "string") {
-    return content.trim().length > 0 ? `${content}\n\n${extra}` : extra;
+    return content.trim().length > 0 ? `${extra}\n\n${content}` : extra;
   }
   if (Array.isArray(content)) {
     const next = content.map((item) => (item && typeof item === "object" ? { ...item } : item));
-    for (let i = next.length - 1; i >= 0; i -= 1) {
+    for (let i = 0; i < next.length; i += 1) {
       const item = next[i];
       if (!item || typeof item !== "object") continue;
       if (typeof (item as any).text === "string") {
         (item as any).text = (item as any).text.trim().length > 0
-          ? `${String((item as any).text)}\n\n${extra}`
+          ? `${extra}\n\n${String((item as any).text)}`
           : extra;
         return next;
       }
       if (typeof (item as any).content === "string") {
         (item as any).content = (item as any).content.trim().length > 0
-          ? `${String((item as any).content)}\n\n${extra}`
+          ? `${extra}\n\n${String((item as any).content)}`
           : extra;
         return next;
       }
     }
-    next.push({ type: "input_text", text: extra });
+    next.unshift({ type: "input_text", text: extra });
     return next;
   }
   return extra;
@@ -667,7 +679,7 @@ async function startEmbeddedResponsesProxy(
           payload.input[1] = {
             ...(devAndUser.userItem ?? payload.input[1]),
             role: "user",
-            content: appendTextToContent((devAndUser.userItem ?? payload.input[1])?.content, developerRewrite.dynamicContextText),
+            content: prependTextToContent((devAndUser.userItem ?? payload.input[1])?.content, developerRewrite.dynamicContextText),
           };
         }
       }
@@ -881,7 +893,7 @@ function maybeInstallProviderTrafficTap(
             parsedBody.input[1] = {
               ...(devAndUser.userItem ?? parsedBody.input[1]),
               role: "user",
-              content: appendTextToContent(
+              content: prependTextToContent(
                 (devAndUser.userItem ?? parsedBody.input[1])?.content,
                 developerRewrite.dynamicContextText,
               ),
@@ -1016,6 +1028,10 @@ function resolveLlmHookTapPath(debugTapPath: string): string {
   return `${debugTapPath}.llm-hooks.jsonl`;
 }
 
+function resolveShadowRuntimeTapPath(stateDir: string): string {
+  return join(stateDir, "ecoclaw", "shadow-runtime.jsonl");
+}
+
 function installLlmHookTap(
   api: any,
   cfg: ReturnType<typeof normalizeConfig>,
@@ -1033,10 +1049,16 @@ function installLlmHookTap(
   for (const hookName of hookNames) {
     hookOn(api, hookName, async (event: any) => {
       try {
+        const turnObservations = extractTurnObservations(event);
         const rec = {
           at: new Date().toISOString(),
           hook: hookName,
           sessionKey: extractSessionKey(event),
+          derived: {
+            lastUserMessage: extractLastUserMessage(event),
+            turnObservationCount: turnObservations.length,
+            turnObservations,
+          },
           event,
         };
         await appendJsonl(llmHookTapPath, rec);
@@ -1222,6 +1244,96 @@ function extractLastAssistant(event: any): any {
   };
 }
 
+type StructuredTurnObservation = {
+  id: string;
+  role: "tool" | "observation";
+  text: string;
+  payloadKind?: "stdout" | "stderr" | "json" | "blob";
+  toolName?: string;
+  source: string;
+  messageIndex?: number;
+  mimeType?: string;
+  textChars: number;
+  textPreview: string;
+};
+
+function inferObservationPayloadKind(
+  text: string,
+  fallback?: unknown,
+): StructuredTurnObservation["payloadKind"] | undefined {
+  if (typeof fallback === "string") {
+    const normalized = fallback.trim().toLowerCase();
+    if (
+      normalized === "stdout" ||
+      normalized === "stderr" ||
+      normalized === "json" ||
+      normalized === "blob"
+    ) {
+      return normalized;
+    }
+  }
+
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  if (/^stderr\s*[:=-]/i.test(trimmed)) return "stderr";
+  if (/^stdout\s*[:=-]/i.test(trimmed)) return "stdout";
+  if (/^blob\s*[:=-]/i.test(trimmed)) return "blob";
+  try {
+    JSON.parse(trimmed);
+    return "json";
+  } catch {
+    // fall through
+  }
+  if (/^data:[^;]+;base64,/i.test(trimmed)) return "blob";
+  if (/^[A-Za-z0-9+/=\s]{512,}$/.test(trimmed.replace(/\n/g, ""))) return "blob";
+  return undefined;
+}
+
+function extractTurnObservations(event: any): StructuredTurnObservation[] {
+  const messages = Array.isArray(event?.messages) ? event.messages : [];
+  const out: StructuredTurnObservation[] = [];
+  for (let i = 0; i < messages.length; i += 1) {
+    const msg = messages[i];
+    const role = String(msg?.role ?? "").toLowerCase();
+    if (role !== "tool" && role !== "observation") continue;
+    const text = contentToText(msg?.content ?? msg?.text ?? "").trim();
+    if (!text) continue;
+    const payloadKind = inferObservationPayloadKind(
+      text,
+      msg?.payloadKind ?? msg?.kind ?? msg?.type,
+    );
+    const toolName =
+      typeof msg?.name === "string" && msg.name.trim().length > 0
+        ? msg.name.trim()
+        : typeof msg?.tool_name === "string" && msg.tool_name.trim().length > 0
+          ? msg.tool_name.trim()
+          : typeof msg?.toolName === "string" && msg.toolName.trim().length > 0
+            ? msg.toolName.trim()
+            : undefined;
+    out.push({
+      id:
+        typeof msg?.tool_call_id === "string" && msg.tool_call_id.trim().length > 0
+          ? msg.tool_call_id.trim()
+          : `msg-${i + 1}`,
+      role: role === "tool" ? "tool" : "observation",
+      text,
+      payloadKind,
+      toolName,
+      source: "event.messages",
+      messageIndex: i,
+      mimeType:
+        typeof msg?.mime_type === "string" && msg.mime_type.trim().length > 0
+          ? msg.mime_type.trim()
+          : typeof msg?.mimeType === "string" && msg.mimeType.trim().length > 0
+            ? msg.mimeType.trim()
+            : undefined,
+      textChars: text.length,
+      textPreview: text.length > 240 ? `${text.slice(0, 240)}...` : text,
+    });
+  }
+  return out;
+}
+
 async function buildPromptRootFromSystemPromptReport(report: any): Promise<string> {
   if (!report || typeof report !== "object") return "";
   const files = Array.isArray(report.injectedWorkspaceFiles) ? report.injectedWorkspaceFiles : [];
@@ -1308,15 +1420,139 @@ async function extractOpenClawPromptRoot(event: any): Promise<string> {
 }
 
 function extractTurnTools(event: any): string[] {
-  const msgs = Array.isArray(event?.messages) ? event.messages : [];
-  const out: string[] = [];
-  for (const m of msgs) {
-    const role = String(m?.role ?? "").toLowerCase();
-    if (role !== "tool") continue;
-    const text = contentToText(m?.content ?? m?.text ?? "").trim();
-    if (text) out.push(text);
+  return extractTurnObservations(event)
+    .filter((item) => item.role === "tool")
+    .map((item) => item.text);
+}
+
+function normalizeShadowProvider(provider: unknown, model: unknown): "openai" | "anthropic" {
+  const providerText = String(provider ?? "").toLowerCase();
+  const modelText = String(model ?? "").toLowerCase();
+  if (
+    providerText.includes("anthropic") ||
+    providerText.includes("claude") ||
+    modelText.includes("claude")
+  ) {
+    return "anthropic";
   }
-  return out;
+  return "openai";
+}
+
+type ShadowConnector = ReturnType<typeof createOpenClawConnector>;
+
+function createShadowRuntimeConnector(cfg: ReturnType<typeof normalizeConfig>): ShadowConnector {
+  return createOpenClawConnector({
+    modules: [
+      createStabilizerModule(),
+      createPolicyModule({
+        summaryTriggerStableChars: 8000,
+      }),
+      createMemoryStateModule({ maxSummaryChars: 2400 }),
+      createCompactionModule(),
+      createSummaryModule({
+        generationMode: "heuristic",
+        fallbackToHeuristic: true,
+        includeAssistantReply: true,
+      }),
+      createReductionModule(),
+      createDecisionLedgerModule(),
+    ],
+    adapters: {
+      openai: openaiAdapter,
+      anthropic: anthropicAdapter,
+    },
+    stateDir: cfg.stateDir,
+    routing: {
+      autoForkOnPolicy: false,
+      physicalSessionPrefix: "shadow",
+    },
+    observability: {
+      eventTracePath: join(cfg.stateDir, "ecoclaw", "event-trace.jsonl"),
+    },
+  });
+}
+
+async function buildShadowTurnContext(
+  event: any,
+  topology: SessionTopologyManager,
+): Promise<RuntimeTurnContext | null> {
+  const sessionKey = extractSessionKey(event);
+  const userMessage = extractLastUserMessage(event).trim();
+  if (!userMessage) return null;
+  const cmd = parseEcoClawCommand(userMessage);
+  if (cmd.kind !== "none") return null;
+
+  const lastAssistant = extractLastAssistant(event);
+  const provider = normalizeShadowProvider(
+    lastAssistant?.provider ?? event?.provider,
+    lastAssistant?.model ?? event?.model,
+  );
+  const model = String(lastAssistant?.model ?? event?.model ?? "unknown").trim() || "unknown";
+  const logicalSessionId = topology.getLogicalSessionId(sessionKey);
+  const promptRoot = await extractOpenClawPromptRoot(event);
+  const turnObservations = extractTurnObservations(event);
+  const turnTools = turnObservations
+    .filter((item) => item.role === "tool")
+    .map((item) => item.text);
+
+  return {
+    sessionId: logicalSessionId,
+    sessionMode: "single",
+    provider,
+    model,
+    prompt: userMessage,
+    segments: [
+      ...(promptRoot
+        ? [
+            {
+              id: "openclaw-root-prompt",
+              kind: "stable" as const,
+              text: promptRoot,
+              priority: 1,
+              source: "openclaw.system_prompt",
+            },
+          ]
+        : []),
+      {
+        id: "latest-user-turn",
+        kind: "volatile" as const,
+        text: userMessage,
+        priority: 10,
+        source: "openclaw.user_turn",
+      },
+    ],
+    budget: {
+      maxInputTokens: 400000,
+      reserveOutputTokens: 16000,
+    },
+    metadata: {
+      sessionKey,
+      logicalSessionId,
+      openclawPromptRoot: promptRoot,
+      turnTools,
+      turnObservations,
+      shadowRuntime: {
+        source: "openclaw-plugin.agent_end",
+        observationCount: turnObservations.length,
+      },
+    },
+  };
+}
+
+function buildShadowTurnResult(event: any): RuntimeTurnResult | null {
+  const lastAssistant = extractLastAssistant(event);
+  const content = contentToText(lastAssistant?.content ?? "").trim();
+  if (!content) return null;
+  const rawUsage = lastAssistant?.usage ?? event?.usage ?? undefined;
+  return {
+    content,
+    usage: rawUsage === undefined ? undefined : { providerRaw: rawUsage },
+    metadata: {
+      shadowRuntime: {
+        source: "openclaw-plugin.agent_end",
+      },
+    },
+  };
 }
 
 function registerEcoClawCommand(
@@ -1393,6 +1629,7 @@ module.exports = {
     const logger = makeLogger(api?.logger);
     const cfg = normalizeConfig(api?.pluginConfig);
     const debugEnabled = cfg.logLevel === "debug";
+    const shadowConnector = createShadowRuntimeConnector(cfg);
 
     if (!cfg.enabled) {
       logger.info("[ecoclaw] Plugin disabled by config.");
@@ -1477,10 +1714,84 @@ module.exports = {
     hookOn(api, "agent_end", async (event: any) => {
       const sessionKey = extractSessionKey(event);
       const lastAssistant = extractLastAssistant(event);
+      const turnObservations = extractTurnObservations(event);
       const model = lastAssistant?.model ?? event?.model ?? "unknown";
       const provider = lastAssistant?.provider ?? event?.provider ?? "unknown";
       if (debugEnabled) {
-        logger.debug(`[ecoclaw] agent_end session=${sessionKey} provider=${provider} model=${model}`);
+        logger.debug(
+          `[ecoclaw] agent_end session=${sessionKey} provider=${provider} model=${model} observations=${turnObservations.length}`,
+        );
+      }
+      try {
+        const turnCtx = await buildShadowTurnContext(event, topology);
+        const turnResult = buildShadowTurnResult(event);
+        if (!turnCtx || !turnResult) {
+          if (debugEnabled || cfg.debugTapProviderTraffic) {
+            await appendJsonl(resolveShadowRuntimeTapPath(cfg.stateDir), {
+              at: new Date().toISOString(),
+              stage: "shadow_runtime_skipped",
+              sessionKey,
+              provider,
+              model,
+              hasTurnContext: Boolean(turnCtx),
+              hasTurnResult: Boolean(turnResult),
+              userMessageChars: extractLastUserMessage(event).trim().length,
+              assistantChars: contentToText(lastAssistant?.content ?? "").trim().length,
+              observationCount: turnObservations.length,
+            });
+          }
+          return;
+        }
+        if (debugEnabled || cfg.debugTapProviderTraffic) {
+          await appendJsonl(resolveShadowRuntimeTapPath(cfg.stateDir), {
+            at: new Date().toISOString(),
+            stage: "shadow_runtime_start",
+            sessionKey,
+            logicalSessionId:
+              (turnCtx.metadata as Record<string, unknown> | undefined)?.logicalSessionId ?? turnCtx.sessionId,
+            provider: turnCtx.provider,
+            model: turnCtx.model,
+            segmentCount: turnCtx.segments.length,
+            observationCount: turnObservations.length,
+            promptChars: turnCtx.prompt.length,
+            responseChars: turnResult.content.length,
+          });
+        }
+        if (turnCtx && turnResult) {
+          await shadowConnector.onLlmCall(turnCtx, async () => turnResult);
+          if (debugEnabled || cfg.debugTapProviderTraffic) {
+            await appendJsonl(resolveShadowRuntimeTapPath(cfg.stateDir), {
+              at: new Date().toISOString(),
+              stage: "shadow_runtime_ok",
+              sessionKey,
+              logicalSessionId:
+                (turnCtx.metadata as Record<string, unknown> | undefined)?.logicalSessionId ?? turnCtx.sessionId,
+              provider: turnCtx.provider,
+              model: turnCtx.model,
+            });
+          }
+        }
+      } catch (err) {
+        if (debugEnabled || cfg.debugTapProviderTraffic) {
+          await appendJsonl(resolveShadowRuntimeTapPath(cfg.stateDir), {
+            at: new Date().toISOString(),
+            stage: "shadow_runtime_error",
+            sessionKey,
+            provider,
+            model,
+            observationCount: turnObservations.length,
+            error: err instanceof Error
+              ? {
+                  name: err.name,
+                  message: err.message,
+                  stack: err.stack,
+                }
+              : String(err),
+          });
+        }
+        logger.warn(
+          `[ecoclaw] shadow runtime turn failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
       return;
     });

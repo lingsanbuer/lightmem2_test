@@ -4,9 +4,13 @@ import { dirname, join } from "node:path";
 import {
   ECOCLAW_EVENT_TYPES,
   appendRuntimeEvent,
+  createObservationSegment,
   findRuntimeEventsByType,
   RuntimePipeline,
   resolveApiFamily,
+  type ContextSegment,
+  type ObservationPayloadKind,
+  type ObservationRole,
   type RuntimeEvent,
   type RuntimeModule,
   type RuntimeStateStore,
@@ -51,18 +55,129 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
 
   const safeName = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, "_");
 
-  const toRecentMessagesText = (value: unknown): string => {
-    if (!Array.isArray(value)) return "";
-    return value
-      .map((item, idx) => {
-        const row = (item ?? {}) as Record<string, unknown>;
-        const num = Number.isFinite(Number(row.index)) ? Number(row.index) : idx + 1;
-        const at = String(row.at ?? "");
-        const user = String(row.user ?? "");
-        const assistant = String(row.assistant ?? "");
-        return `[${num}] ${at}\nUSER: ${user}\nASSISTANT: ${assistant}`;
-      })
-      .join("\n\n");
+  const normalizePayloadKind = (value: unknown): ObservationPayloadKind | undefined => {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (
+      normalized === "stdout" ||
+      normalized === "stderr" ||
+      normalized === "json" ||
+      normalized === "blob"
+    ) {
+      return normalized;
+    }
+    return undefined;
+  };
+
+  const normalizeObservationRole = (value: unknown): ObservationRole | undefined => {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "tool" || normalized === "observation") return normalized;
+    return undefined;
+  };
+
+  const normalizeObservationStability = (
+    value: unknown,
+  ): ContextSegment["kind"] | undefined => {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (
+      normalized === "stable" ||
+      normalized === "semi_stable" ||
+      normalized === "volatile"
+    ) {
+      return normalized;
+    }
+    return undefined;
+  };
+
+  const buildObservationSegments = (ctx: RuntimeTurnContext): ContextSegment[] => {
+    const metadata =
+      ctx.metadata && typeof ctx.metadata === "object"
+        ? (ctx.metadata as Record<string, unknown>)
+        : undefined;
+    if (!metadata) return [];
+
+    const out: ContextSegment[] = [];
+    const turnObservations = Array.isArray(metadata.turnObservations)
+      ? metadata.turnObservations
+      : [];
+    for (let i = 0; i < turnObservations.length; i += 1) {
+      const item = turnObservations[i];
+      if (typeof item === "string") {
+        const text = item.trim();
+        if (!text) continue;
+        out.push(
+          createObservationSegment({
+            id: `turn-observation-${i + 1}`,
+            text,
+            source: "metadata.turnObservations",
+            role: "observation",
+          }),
+        );
+        continue;
+      }
+      if (!item || typeof item !== "object") continue;
+      const obj = item as Record<string, unknown>;
+      const text = typeof obj.text === "string" ? obj.text.trim() : "";
+      if (!text) continue;
+      out.push(
+        createObservationSegment({
+          id:
+            typeof obj.id === "string" && obj.id.trim().length > 0
+              ? obj.id.trim()
+              : `turn-observation-${i + 1}`,
+          text,
+          priority:
+            typeof obj.priority === "number" && Number.isFinite(obj.priority)
+              ? obj.priority
+              : undefined,
+          stability: normalizeObservationStability(obj.stability),
+          source:
+            typeof obj.source === "string" && obj.source.trim().length > 0
+              ? obj.source.trim()
+              : "metadata.turnObservations",
+          role: normalizeObservationRole(obj.role),
+          payloadKind: normalizePayloadKind(obj.payloadKind),
+          toolName:
+            typeof obj.toolName === "string" && obj.toolName.trim().length > 0
+              ? obj.toolName.trim()
+              : undefined,
+          origin:
+            typeof obj.origin === "string" && obj.origin.trim().length > 0
+              ? obj.origin.trim()
+              : undefined,
+          mimeType:
+            typeof obj.mimeType === "string" && obj.mimeType.trim().length > 0
+              ? obj.mimeType.trim()
+              : undefined,
+          truncated:
+            typeof obj.truncated === "boolean" ? obj.truncated : undefined,
+          metadata:
+            obj.metadata && typeof obj.metadata === "object"
+              ? (obj.metadata as Record<string, unknown>)
+              : undefined,
+        }),
+      );
+    }
+
+    const turnTools = Array.isArray(metadata.turnTools) ? metadata.turnTools : [];
+    for (let i = 0; i < turnTools.length; i += 1) {
+      const item = turnTools[i];
+      if (typeof item !== "string") continue;
+      const text = item.trim();
+      if (!text) continue;
+      out.push(
+        createObservationSegment({
+          id: `turn-tool-${i + 1}`,
+          text,
+          source: "metadata.turnTools",
+          role: "tool",
+        }),
+      );
+    }
+
+    return out;
   };
 
   const appendEventTrace = async (
@@ -136,7 +251,7 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
     return { logicalSessionId, physicalSessionId };
   };
 
-  const maybeForkAfterPolicy = async (
+  const maybeApplyCompactionPlan = async (
     logicalSessionId: string,
     physicalSessionId: string,
     ctx: RuntimeTurnContext,
@@ -145,30 +260,24 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
   ) => {
     if (!autoForkOnPolicy) return { applied: false, reason: "auto_fork_disabled" } as const;
     const resultMeta = (result.metadata ?? {}) as Record<string, unknown>;
-    const forkEvents = findRuntimeEventsByType(resultMeta, ECOCLAW_EVENT_TYPES.POLICY_FORK_RECOMMENDED);
-    const summaryEvents = findRuntimeEventsByType(resultMeta, ECOCLAW_EVENT_TYPES.SUMMARY_GENERATED);
-    if (forkEvents.length === 0 || summaryEvents.length === 0) {
-      return { applied: false, reason: "no_fork_or_summary_event" } as const;
+    const planEvents = findRuntimeEventsByType(resultMeta, ECOCLAW_EVENT_TYPES.COMPACTION_PLAN_GENERATED);
+    if (planEvents.length === 0) {
+      return { applied: false, reason: "no_compaction_plan" } as const;
     }
 
-    const latestSummary = summaryEvents[summaryEvents.length - 1];
-    const summaryPayload = (latestSummary.payload ?? {}) as Record<string, unknown>;
-    const summaryText = String(summaryPayload.summaryText ?? "").trim();
-    if (!summaryText) return { applied: false, reason: "empty_summary_text" } as const;
-    const resumePrefixPrompt = String(summaryPayload.resumePrefixPrompt ?? "").trim();
-    const recentMessagesText = toRecentMessagesText(summaryPayload.recentMessages);
-    const seedSummary = [
-      resumePrefixPrompt,
-      summaryText,
-      recentMessagesText ? `## Recent Raw Messages\n${recentMessagesText}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const latestPlan = planEvents[planEvents.length - 1];
+    const planPayload = (latestPlan.payload ?? {}) as Record<string, unknown>;
+    const seedSummary = String(planPayload.seedSummary ?? "").trim();
+    if (!seedSummary) return { applied: false, reason: "empty_seed_summary" } as const;
+    const summaryChars =
+      typeof planPayload.summaryChars === "number" && Number.isFinite(planPayload.summaryChars)
+        ? planPayload.summaryChars
+        : seedSummary.length;
 
     forkCounter += 1;
     const newPhysical = `${physicalSessionPrefix}-${safeName(logicalSessionId)}-f${forkCounter.toString().padStart(4, "0")}`;
     logicalToPhysical.set(logicalSessionId, newPhysical);
-    await stateStore?.writeSummary(newPhysical, seedSummary, "policy-fork-seed");
+    await stateStore?.writeSummary(newPhysical, seedSummary, "compaction-seed");
 
     const seedCtx: RuntimeTurnContext = {
       ...ctx,
@@ -179,7 +288,7 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
         logicalSessionId,
         physicalSessionId: newPhysical,
         forkedFromSessionId: physicalSessionId,
-        forkSeedSummaryChars: summaryText.length,
+        forkSeedSummaryChars: summaryChars,
         policyBypass: true,
       },
       segments: [
@@ -199,8 +308,16 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
       applied: true,
       newPhysical,
       fromPhysical: physicalSessionId,
-      summaryChars: summaryText.length,
+      summaryChars,
       seedUsage: seedResult.usage,
+      planId:
+        typeof planPayload.planId === "string" && planPayload.planId.trim().length > 0
+          ? planPayload.planId
+          : undefined,
+      strategy:
+        typeof planPayload.strategy === "string" && planPayload.strategy.trim().length > 0
+          ? planPayload.strategy
+          : "summary_then_fork",
     } as const;
   };
 
@@ -211,19 +328,25 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
     },
     async onLlmCall(turnCtx: RuntimeTurnContext, invokeModel: (ctx: RuntimeTurnContext) => Promise<RuntimeTurnResult>) {
       const startedAt = new Date().toISOString();
+      const observationSegments = buildObservationSegments(turnCtx);
       const { logicalSessionId, physicalSessionId } = resolveRouting(turnCtx);
       const routedCtx: RuntimeTurnContext = {
         ...turnCtx,
         sessionId: physicalSessionId,
+        segments:
+          observationSegments.length > 0
+            ? [...turnCtx.segments, ...observationSegments]
+            : turnCtx.segments,
         metadata: {
           ...(turnCtx.metadata ?? {}),
           logicalSessionId,
           physicalSessionId,
+          observationSegmentCount: observationSegments.length,
         },
       };
       try {
         const result = await pipeline.run(routedCtx, invokeModel);
-        const forkOutcome = await maybeForkAfterPolicy(
+        const forkOutcome = await maybeApplyCompactionPlan(
           logicalSessionId,
           physicalSessionId,
           routedCtx,
@@ -233,11 +356,12 @@ export function createOpenClawConnector(cfg: OpenClawConnectorConfig) {
         if (forkOutcome.applied) {
           const usage = result.usage ?? {};
           const payload = {
-            strategy: "summary_then_fork",
+            strategy: forkOutcome.strategy,
             logicalSessionId,
             fromPhysicalSessionId: forkOutcome.fromPhysical,
             toPhysicalSessionId: forkOutcome.newPhysical,
             summaryChars: forkOutcome.summaryChars,
+            planId: forkOutcome.planId,
             compactionTurn: {
               promptTokens:
                 typeof usage.inputTokens === "number"

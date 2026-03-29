@@ -27,17 +27,11 @@
   },
   "scripts": {
     "build": "tsx build.ts",
+    "pack:release": "bash ./scripts/pack_release.sh",
+    "install:release": "bash ./scripts/install_release.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "acceptance:cache": "bash ./scripts/cache_acceptance.sh",
     "prepublishOnly": "npm run build"
-  },
-  "dependencies": {
-    "@ecoclaw/layer-data": "workspace:*",
-    "@ecoclaw/layer-decision": "workspace:*",
-    "@ecoclaw/layer-execution": "workspace:*",
-    "@ecoclaw/layer-orchestration": "workspace:*",
-    "@ecoclaw/provider-anthropic": "workspace:*",
-    "@ecoclaw/provider-openai": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "^0.25.10",

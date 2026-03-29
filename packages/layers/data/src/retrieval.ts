@@ -34,12 +34,3 @@ export function createRetrievalModule(cfg: RetrievalModuleConfig = {}): RuntimeM
     },
   };
 }
-
-// Backward-compatible alias: older code can still call the previous function.
-export function createRetrievalQmdModule(cfg: RetrievalModuleConfig = {}): RuntimeModule {
-  return createRetrievalModule({
-    implementation: "qmd",
-    provider: "qmd",
-    ...cfg,
-  });
-}
