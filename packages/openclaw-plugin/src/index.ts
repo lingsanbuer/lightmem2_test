@@ -19,6 +19,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { readFile, mkdir, appendFile, writeFile } from "node:fs/promises";
 import { ECOCLAW_EVENT_TYPES, type RuntimeTurnContext, type RuntimeTurnResult } from "@ecoclaw/kernel";
+import {
+  applyRootPromptRewriteToChatMessages,
+  prependTextToContent,
+  type RootPromptRewrite,
+  rewriteRootPromptForStablePrefix,
+} from "./root-prompt-stabilizer.js";
 
 type EcoClawPluginConfig = {
   enabled?: boolean;
@@ -30,6 +36,15 @@ type EcoClawPluginConfig = {
   debugTapPath?: string;
   proxyAutostart?: boolean;
   proxyPort?: number;
+  modules?: {
+    stabilizer?: boolean;
+    policy?: boolean;
+    summary?: boolean;
+    reduction?: boolean;
+    compaction?: boolean;
+    handoff?: boolean;
+    decisionLedger?: boolean;
+  };
   compaction?: {
     enabled?: boolean;
     autoForkOnPolicy?: boolean;
@@ -42,6 +57,10 @@ type EcoClawPluginConfig = {
     resumePrefixPrompt?: string;
     resumePrefixPromptPath?: string;
     compactionCooldownTurns?: number;
+    turnLocalCompaction?: {
+      enabled?: boolean;
+      archiveDir?: string;
+    };
   };
   handoff?: {
     enabled?: boolean;
@@ -345,6 +364,7 @@ function normalizeConfig(raw: unknown): Required<Omit<EcoClawPluginConfig, "prox
   const cfg = (raw ?? {}) as EcoClawPluginConfig;
   const defaultStateDir = join(homedir(), ".openclaw", "ecoclaw-plugin-state");
   const stateDir = cfg.stateDir ?? defaultStateDir;
+  const modules = cfg.modules ?? {};
   const compaction = cfg.compaction ?? {};
   const handoff = cfg.handoff ?? {};
   const semantic = cfg.semanticReduction ?? {};
@@ -359,6 +379,15 @@ function normalizeConfig(raw: unknown): Required<Omit<EcoClawPluginConfig, "prox
     debugTapPath: cfg.debugTapPath ?? join(stateDir, "ecoclaw", "provider-traffic.jsonl"),
     proxyAutostart: cfg.proxyAutostart ?? true,
     proxyPort: Math.max(1025, Math.min(65535, cfg.proxyPort ?? 17667)),
+    modules: {
+      stabilizer: modules.stabilizer ?? true,
+      policy: modules.policy ?? true,
+      summary: modules.summary ?? true,
+      reduction: modules.reduction ?? true,
+      compaction: modules.compaction ?? true,
+      handoff: modules.handoff ?? true,
+      decisionLedger: modules.decisionLedger ?? true,
+    },
     compaction: {
       enabled: compaction.enabled ?? true,
       autoForkOnPolicy: compaction.autoForkOnPolicy ?? true,
@@ -374,6 +403,12 @@ function normalizeConfig(raw: unknown): Required<Omit<EcoClawPluginConfig, "prox
       resumePrefixPromptPath:
         typeof compaction.resumePrefixPromptPath === "string" ? compaction.resumePrefixPromptPath : undefined,
       compactionCooldownTurns: Math.max(0, compaction.compactionCooldownTurns ?? 6),
+      turnLocalCompaction: {
+        enabled: compaction.turnLocalCompaction?.enabled ?? false,
+        archiveDir: typeof compaction.turnLocalCompaction?.archiveDir === "string"
+          ? compaction.turnLocalCompaction.archiveDir
+          : undefined,
+      },
     },
     handoff: {
       enabled: handoff.enabled ?? false,
@@ -639,99 +674,6 @@ function findDeveloperAndPrimaryUser(input: any): {
   }
   const userItem = userIndex >= 0 ? input[userIndex] : null;
   return { developerText, developerIndex, developerItem, userIndex, userItem };
-}
-
-type DeveloperRewrite = {
-  canonicalDeveloperText: string;
-  forwardedDeveloperText: string;
-  dynamicContextText: string;
-  changed: boolean;
-  workdir?: string;
-  agentId?: string;
-};
-
-function rewriteDeveloperPromptForRootLink(developerText: string): DeveloperRewrite {
-  const raw = String(developerText ?? "");
-  if (!raw.trim()) {
-    return {
-      canonicalDeveloperText: raw,
-      forwardedDeveloperText: raw,
-      dynamicContextText: "",
-      changed: false,
-    };
-  }
-  const workdirMatch = raw.match(/Your working directory is:\s*([^\n\r]+)/i);
-  const runtimeAgentMatch = raw.match(/Runtime:\s*agent=([^|\n\r]+)/i);
-  const workdir = workdirMatch?.[1]?.trim();
-  const agentId = runtimeAgentMatch?.[1]?.trim();
-
-  let canonical = raw;
-  if (workdir) {
-    canonical = canonical.split(workdir).join("<WORKDIR>");
-  }
-  canonical = canonical.replace(/(Runtime:\s*agent=)[^|\n\r]+/gi, "$1<AGENT_ID>");
-  canonical = canonical.replace(
-    /^##\s+<WORKDIR>[\\/]+([^\\/\n\r]+)$/gm,
-    "## $1",
-  );
-  canonical = canonical.replace(
-    /^##\s+(?:[A-Za-z]:[\\/]|\/)[^\n\r]*[\\/]+([^\\/\n\r]+)$/gm,
-    "## $1",
-  );
-  canonical = canonical.replace(
-    /(\[MISSING\]\s+Expected at:\s*)<WORKDIR>[\\/]+([^\\/\n\r]+)/g,
-    "$1$2",
-  );
-  canonical = canonical.replace(
-    /(\[MISSING\]\s+Expected at:\s*)(?:[A-Za-z]:[\\/]|\/)[^\n\r]*[\\/]+([^\\/\n\r]+)/g,
-    "$1$2",
-  );
-
-  const dynamicLines: string[] = [];
-  if (workdir) dynamicLines.push(`- WORKDIR: ${workdir}`);
-  if (agentId) dynamicLines.push(`- AGENT_ID: ${agentId}`);
-  const dynamicTail =
-    dynamicLines.length > 0
-      ? `\n${dynamicLines.join("\n")}`
-      : "";
-  return {
-    canonicalDeveloperText: canonical,
-    forwardedDeveloperText: canonical,
-    dynamicContextText: dynamicTail.trim(),
-    changed: canonical !== raw || dynamicTail.length > 0,
-    workdir,
-    agentId,
-  };
-}
-
-function prependTextToContent(content: any, extraText: string): any {
-  const extra = String(extraText ?? "").trim();
-  if (!extra) return content;
-  if (typeof content === "string") {
-    return content.trim().length > 0 ? `${extra}\n\n${content}` : extra;
-  }
-  if (Array.isArray(content)) {
-    const next = content.map((item) => (item && typeof item === "object" ? { ...item } : item));
-    for (let i = 0; i < next.length; i += 1) {
-      const item = next[i];
-      if (!item || typeof item !== "object") continue;
-      if (typeof (item as any).text === "string") {
-        (item as any).text = (item as any).text.trim().length > 0
-          ? `${extra}\n\n${String((item as any).text)}`
-          : extra;
-        return next;
-      }
-      if (typeof (item as any).content === "string") {
-        (item as any).content = (item as any).content.trim().length > 0
-          ? `${extra}\n\n${String((item as any).content)}`
-          : extra;
-        return next;
-      }
-    }
-    next.unshift({ type: "input_text", text: extra });
-    return next;
-  }
-  return extra;
 }
 
 function cloneJson<T>(value: T): T {
@@ -1125,32 +1067,32 @@ async function startEmbeddedResponsesProxy(
       const instructions = normalizeText(String(payload?.instructions ?? ""));
       const devAndUser = findDeveloperAndPrimaryUser(payload?.input);
       const firstTurnCandidate = Boolean(devAndUser);
-      const developerRewrite = devAndUser
-        ? rewriteDeveloperPromptForRootLink(devAndUser.developerText)
+      const rootPromptRewrite = devAndUser
+        ? rewriteRootPromptForStablePrefix(devAndUser.developerText)
         : null;
       const developerCanonicalText = normalizeText(
-        developerRewrite?.canonicalDeveloperText ?? devAndUser?.developerText ?? "",
+        rootPromptRewrite?.canonicalPromptText ?? devAndUser?.developerText ?? "",
       );
       const developerForwardedText = normalizeText(
-        developerRewrite?.forwardedDeveloperText ?? devAndUser?.developerText ?? "",
+        rootPromptRewrite?.forwardedPromptText ?? devAndUser?.developerText ?? "",
       );
       const originalPromptCacheKey =
         typeof payload?.prompt_cache_key === "string" && payload.prompt_cache_key.trim().length > 0
           ? String(payload.prompt_cache_key)
           : "";
-      if (devAndUser && developerRewrite && Array.isArray(payload?.input) && devAndUser.developerIndex >= 0) {
+      if (devAndUser && rootPromptRewrite && Array.isArray(payload?.input) && devAndUser.developerIndex >= 0) {
         payload.input[devAndUser.developerIndex] = {
           ...(devAndUser.developerItem ?? payload.input[devAndUser.developerIndex]),
           role: "developer",
-          content: developerRewrite.forwardedDeveloperText,
+          content: rootPromptRewrite.forwardedPromptText,
         };
-        if (developerRewrite.dynamicContextText && devAndUser.userIndex >= 0) {
+        if (rootPromptRewrite.dynamicContextText && devAndUser.userIndex >= 0) {
           payload.input[devAndUser.userIndex] = {
             ...(devAndUser.userItem ?? payload.input[devAndUser.userIndex]),
             role: "user",
             content: prependTextToContent(
               (devAndUser.userItem ?? payload.input[devAndUser.userIndex])?.content,
-              developerRewrite.dynamicContextText,
+              rootPromptRewrite.dynamicContextText,
             ),
           };
         }
@@ -1172,9 +1114,9 @@ async function startEmbeddedResponsesProxy(
           firstTurnCandidate,
           developerChars: developerForwardedText.length,
           developerCanonicalChars: developerCanonicalText.length,
-          developerRewritten: Boolean(developerRewrite?.changed),
-          developerRewriteWorkdir: developerRewrite?.workdir ?? "",
-          developerRewriteAgentId: developerRewrite?.agentId ?? "",
+          developerRewritten: Boolean(rootPromptRewrite?.changed),
+          developerRewriteWorkdir: rootPromptRewrite?.workdir ?? "",
+          developerRewriteAgentId: rootPromptRewrite?.agentId ?? "",
           manualReplayLogicalSessionId: manualReplay?.logicalSessionId ?? "",
           manualReplayPhysicalSessionId: manualReplay?.physicalSessionId ?? "",
           manualReplayItemCount: manualReplay?.replayItemCount ?? 0,
@@ -1357,32 +1299,39 @@ function maybeInstallProviderTrafficTap(
         const manualReplay = isResponsesCall
           ? await maybeApplyManualBranchReplay(parsedBody, cfg, topology, resolveTurnBinding)
           : null;
-        const devAndUser = isResponsesCall ? findDeveloperAndPrimaryUser(parsedBody?.input) : null;
-        const developerRewrite = devAndUser
-          ? rewriteDeveloperPromptForRootLink(devAndUser.developerText)
-          : null;
-        if (
-          devAndUser &&
-          developerRewrite &&
-          Array.isArray(parsedBody?.input) &&
-          devAndUser.developerIndex >= 0 &&
-          developerRewrite.changed
-        ) {
-          parsedBody.input[devAndUser.developerIndex] = {
-            ...(devAndUser.developerItem ?? parsedBody.input[devAndUser.developerIndex]),
-            role: "developer",
-            content: developerRewrite.forwardedDeveloperText,
-          };
-          if (developerRewrite.dynamicContextText && devAndUser.userIndex >= 0) {
-            parsedBody.input[devAndUser.userIndex] = {
-              ...(devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex]),
-              role: "user",
-              content: prependTextToContent(
-                (devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex])?.content,
-                developerRewrite.dynamicContextText,
-              ),
+        let rootPromptRewrite: RootPromptRewrite | null = null;
+        if (isResponsesCall) {
+          const devAndUser = findDeveloperAndPrimaryUser(parsedBody?.input);
+          rootPromptRewrite = devAndUser
+            ? rewriteRootPromptForStablePrefix(devAndUser.developerText)
+            : null;
+          if (
+            devAndUser &&
+            rootPromptRewrite &&
+            Array.isArray(parsedBody?.input) &&
+            devAndUser.developerIndex >= 0 &&
+            rootPromptRewrite.changed
+          ) {
+            parsedBody.input[devAndUser.developerIndex] = {
+              ...(devAndUser.developerItem ?? parsedBody.input[devAndUser.developerIndex]),
+              role: "developer",
+              content: rootPromptRewrite.forwardedPromptText,
             };
+            if (rootPromptRewrite.dynamicContextText && devAndUser.userIndex >= 0) {
+              parsedBody.input[devAndUser.userIndex] = {
+                ...(devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex]),
+                role: "user",
+                content: prependTextToContent(
+                  (devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex])?.content,
+                  rootPromptRewrite.dynamicContextText,
+                ),
+              };
+            }
           }
+        } else if (isChatCompletionsCall && Array.isArray(parsedBody?.messages)) {
+          const rewrittenMessages = applyRootPromptRewriteToChatMessages(parsedBody.messages);
+          parsedBody.messages = rewrittenMessages.messages;
+          rootPromptRewrite = rewrittenMessages.rewrite;
         }
         const originalPromptCacheKey =
           typeof parsedBody?.prompt_cache_key === "string" && parsedBody.prompt_cache_key.trim().length > 0
@@ -1419,9 +1368,9 @@ function maybeInstallProviderTrafficTap(
           userContentRewrites: stableRewrite.userContentRewrites,
           senderMetadataBlocksBefore: stableRewrite.senderMetadataBlocksBefore,
           senderMetadataBlocksAfter: stableRewrite.senderMetadataBlocksAfter,
-          developerPromptRewritten: Boolean(developerRewrite?.changed),
-          developerRewriteWorkdir: developerRewrite?.workdir ?? "",
-          developerRewriteAgentId: developerRewrite?.agentId ?? "",
+          developerPromptRewritten: Boolean(rootPromptRewrite?.changed),
+          developerRewriteWorkdir: rootPromptRewrite?.workdir ?? "",
+          developerRewriteAgentId: rootPromptRewrite?.agentId ?? "",
           bodySource,
         });
       } catch {
@@ -1828,6 +1777,7 @@ type StructuredTurnObservation = {
   mimeType?: string;
   textChars: number;
   textPreview: string;
+  metadata?: Record<string, unknown>;
 };
 
 function inferObservationPayloadKind(
@@ -1862,13 +1812,48 @@ function inferObservationPayloadKind(
   return undefined;
 }
 
+function buildToolCallArgsMap(messages: any[]): Map<string, { toolName?: string; path?: string }> {
+  const map = new Map<string, { toolName?: string; path?: string }>();
+  for (const msg of messages) {
+    const role = String(msg?.role ?? "").toLowerCase();
+    if (role !== "assistant") continue;
+    const content = Array.isArray(msg?.content) ? msg.content : [];
+    for (const item of content) {
+      if (!item || typeof item !== "object") continue;
+      if (item.type !== "toolCall" && item.type !== "tool_call") continue;
+      const callId =
+        typeof item.id === "string" && item.id.trim().length > 0 ? item.id.trim() : undefined;
+      if (!callId) continue;
+      const toolName =
+        typeof item.name === "string" && item.name.trim().length > 0
+          ? item.name.trim()
+          : undefined;
+      const args =
+        item.arguments && typeof item.arguments === "object"
+          ? (item.arguments as Record<string, unknown>)
+          : undefined;
+      const path =
+        typeof args?.path === "string" && args.path.trim().length > 0
+          ? args.path.trim()
+          : typeof args?.file_path === "string" && args.file_path.trim().length > 0
+            ? args.file_path.trim()
+            : typeof args?.filePath === "string" && args.filePath.trim().length > 0
+              ? args.filePath.trim()
+              : undefined;
+      map.set(callId, { toolName, path });
+    }
+  }
+  return map;
+}
+
 function extractTurnObservations(event: any): StructuredTurnObservation[] {
   const messages = Array.isArray(event?.messages) ? event.messages : [];
+  const toolCallArgsMap = buildToolCallArgsMap(messages);
   const out: StructuredTurnObservation[] = [];
   for (let i = 0; i < messages.length; i += 1) {
     const msg = messages[i];
     const role = String(msg?.role ?? "").toLowerCase();
-    if (role !== "tool" && role !== "observation") continue;
+    if (role !== "tool" && role !== "observation" && role !== "toolresult") continue;
     const text = contentToText(msg?.content ?? msg?.text ?? "").trim();
     if (!text) continue;
     const payloadKind = inferObservationPayloadKind(
@@ -1878,20 +1863,28 @@ function extractTurnObservations(event: any): StructuredTurnObservation[] {
     const toolName =
       typeof msg?.name === "string" && msg.name.trim().length > 0
         ? msg.name.trim()
-        : typeof msg?.tool_name === "string" && msg.tool_name.trim().length > 0
-          ? msg.tool_name.trim()
-          : typeof msg?.toolName === "string" && msg.toolName.trim().length > 0
-            ? msg.toolName.trim()
+        : typeof msg?.toolName === "string" && msg.toolName.trim().length > 0
+          ? msg.toolName.trim()
+          : typeof msg?.tool_name === "string" && msg.tool_name.trim().length > 0
+            ? msg.tool_name.trim()
             : undefined;
+    const callId =
+      typeof msg?.tool_call_id === "string" && msg.tool_call_id.trim().length > 0
+        ? msg.tool_call_id.trim()
+        : typeof msg?.toolCallId === "string" && msg.toolCallId.trim().length > 0
+          ? msg.toolCallId.trim()
+          : undefined;
+    const toolCallArgs = callId ? toolCallArgsMap.get(callId) : undefined;
+    const resolvedPath = toolCallArgs?.path;
+    const metadata: Record<string, unknown> | undefined = resolvedPath
+      ? { path: resolvedPath, file_path: resolvedPath }
+      : undefined;
     out.push({
-      id:
-        typeof msg?.tool_call_id === "string" && msg.tool_call_id.trim().length > 0
-          ? msg.tool_call_id.trim()
-          : `msg-${i + 1}`,
-      role: role === "tool" ? "tool" : "observation",
+      id: callId ?? `msg-${i + 1}`,
+      role: role === "tool" || role === "toolresult" ? "tool" : "observation",
       text,
       payloadKind,
-      toolName,
+      toolName: toolName ?? toolCallArgs?.toolName,
       source: "event.messages",
       messageIndex: i,
       mimeType:
@@ -1902,6 +1895,7 @@ function extractTurnObservations(event: any): StructuredTurnObservation[] {
             : undefined,
       textChars: text.length,
       textPreview: text.length > 240 ? `${text.slice(0, 240)}...` : text,
+      ...(metadata ? { metadata } : {}),
     });
   }
   return out;
@@ -2018,70 +2012,82 @@ function createShadowRuntimeConnector(cfg: ReturnType<typeof normalizeConfig>): 
     provider: "none" as const,
     requestTimeoutMs: 30000,
   };
-  return createOpenClawConnector({
-    modules: [
-      createStabilizerModule(),
-      createPolicyModule({
-        summaryGenerationMode: cfg.compaction.summaryGenerationMode,
-        summaryMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
-        handoffEnabled: cfg.handoff.enabled,
-        handoffGenerationMode: cfg.handoff.handoffGenerationMode,
-        handoffMaxOutputTokens: cfg.handoff.handoffMaxOutputTokens,
-        handoffCooldownTurns: cfg.handoff.handoffCooldownTurns,
-        reductionSemanticEnabled: cfg.semanticReduction.enabled,
-        reductionSemanticMinChars: cfg.semanticReduction.minInputChars,
-        compactionEnabled: cfg.compaction.enabled,
-        compactionCooldownTurns: cfg.compaction.compactionCooldownTurns,
-      }),
-      createContextStateModule({ maxSummaryChars: 2400 }),
-      createCompactionModule({
-        generationMode: cfg.compaction.summaryGenerationMode,
-        fallbackToHeuristic: cfg.compaction.summaryFallbackToHeuristic,
-        compactionMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
-        includeAssistantReply: cfg.compaction.includeAssistantReply,
-        compactionPrompt: cfg.compaction.summaryPrompt,
-        compactionPromptPath: cfg.compaction.summaryPromptPath,
-        resumePrefixPrompt: cfg.compaction.resumePrefixPrompt,
-        resumePrefixPromptPath: cfg.compaction.resumePrefixPromptPath,
-      }),
-      createSummaryModule({
-        generationMode: cfg.compaction.summaryGenerationMode,
-        fallbackToHeuristic: cfg.compaction.summaryFallbackToHeuristic,
-        summaryMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
-        includeAssistantReply: cfg.compaction.includeAssistantReply,
-      }),
-      createHandoffModule({
-        generationMode: cfg.handoff.handoffGenerationMode,
-        fallbackToHeuristic: cfg.handoff.handoffFallbackToHeuristic,
-        handoffMaxOutputTokens: cfg.handoff.handoffMaxOutputTokens,
-        includeAssistantReply: cfg.handoff.includeAssistantReply,
-        handoffPrompt: cfg.handoff.handoffPrompt,
-        handoffPromptPath: cfg.handoff.handoffPromptPath,
-        triggerEventType: ECOCLAW_EVENT_TYPES.POLICY_HANDOFF_REQUESTED,
-      }),
-      createReductionModule({
-        semanticLlmlingua2: {
-          enabled: cfg.semanticReduction.enabled,
-          pythonBin: cfg.semanticReduction.pythonBin,
-          timeoutMs: cfg.semanticReduction.timeoutMs,
-          modelPath: cfg.semanticReduction.llmlinguaModelPath,
-          targetRatio: cfg.semanticReduction.targetRatio,
-          minInputChars: cfg.semanticReduction.minInputChars,
-          minSavedChars: cfg.semanticReduction.minSavedChars,
-          preselectRatio: cfg.semanticReduction.preselectRatio,
-          maxChunkChars: cfg.semanticReduction.maxChunkChars,
-          embedding: {
-            provider: semanticEmbedding.provider,
-            modelPath: semanticEmbedding.modelPath,
-            apiBaseUrl: semanticEmbedding.apiBaseUrl,
-            apiKey: semanticEmbedding.apiKey,
-            apiModel: semanticEmbedding.apiModel,
-            requestTimeoutMs: semanticEmbedding.requestTimeoutMs,
+  const modules = [
+    cfg.modules.stabilizer ? createStabilizerModule() : null,
+    cfg.modules.policy
+      ? createPolicyModule({
+          summaryGenerationMode: cfg.compaction.summaryGenerationMode,
+          summaryMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
+          handoffEnabled: cfg.handoff.enabled,
+          handoffGenerationMode: cfg.handoff.handoffGenerationMode,
+          handoffMaxOutputTokens: cfg.handoff.handoffMaxOutputTokens,
+          handoffCooldownTurns: cfg.handoff.handoffCooldownTurns,
+          reductionSemanticEnabled: cfg.semanticReduction.enabled,
+          reductionSemanticMinChars: cfg.semanticReduction.minInputChars,
+          compactionEnabled: cfg.compaction.enabled,
+          compactionCooldownTurns: cfg.compaction.compactionCooldownTurns,
+        })
+      : null,
+    createContextStateModule({ maxSummaryChars: 2400 }),
+    cfg.modules.compaction
+      ? createCompactionModule({
+          generationMode: cfg.compaction.summaryGenerationMode,
+          fallbackToHeuristic: cfg.compaction.summaryFallbackToHeuristic,
+          compactionMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
+          includeAssistantReply: cfg.compaction.includeAssistantReply,
+          compactionPrompt: cfg.compaction.summaryPrompt,
+          compactionPromptPath: cfg.compaction.summaryPromptPath,
+          resumePrefixPrompt: cfg.compaction.resumePrefixPrompt,
+          resumePrefixPromptPath: cfg.compaction.resumePrefixPromptPath,
+          turnLocalCompaction: cfg.compaction.turnLocalCompaction,
+        })
+      : null,
+    cfg.modules.summary
+      ? createSummaryModule({
+          generationMode: cfg.compaction.summaryGenerationMode,
+          fallbackToHeuristic: cfg.compaction.summaryFallbackToHeuristic,
+          summaryMaxOutputTokens: cfg.compaction.summaryMaxOutputTokens,
+          includeAssistantReply: cfg.compaction.includeAssistantReply,
+        })
+      : null,
+    cfg.modules.handoff
+      ? createHandoffModule({
+          generationMode: cfg.handoff.handoffGenerationMode,
+          fallbackToHeuristic: cfg.handoff.handoffFallbackToHeuristic,
+          handoffMaxOutputTokens: cfg.handoff.handoffMaxOutputTokens,
+          includeAssistantReply: cfg.handoff.includeAssistantReply,
+          handoffPrompt: cfg.handoff.handoffPrompt,
+          handoffPromptPath: cfg.handoff.handoffPromptPath,
+          triggerEventType: ECOCLAW_EVENT_TYPES.POLICY_HANDOFF_REQUESTED,
+        })
+      : null,
+    cfg.modules.reduction
+      ? createReductionModule({
+          semanticLlmlingua2: {
+            enabled: cfg.semanticReduction.enabled,
+            pythonBin: cfg.semanticReduction.pythonBin,
+            timeoutMs: cfg.semanticReduction.timeoutMs,
+            modelPath: cfg.semanticReduction.llmlinguaModelPath,
+            targetRatio: cfg.semanticReduction.targetRatio,
+            minInputChars: cfg.semanticReduction.minInputChars,
+            minSavedChars: cfg.semanticReduction.minSavedChars,
+            preselectRatio: cfg.semanticReduction.preselectRatio,
+            maxChunkChars: cfg.semanticReduction.maxChunkChars,
+            embedding: {
+              provider: semanticEmbedding.provider,
+              modelPath: semanticEmbedding.modelPath,
+              apiBaseUrl: semanticEmbedding.apiBaseUrl,
+              apiKey: semanticEmbedding.apiKey,
+              apiModel: semanticEmbedding.apiModel,
+              requestTimeoutMs: semanticEmbedding.requestTimeoutMs,
+            },
           },
-        },
-      }),
-      createDecisionLedgerModule(),
-    ],
+        })
+      : null,
+    cfg.modules.decisionLedger ? createDecisionLedgerModule() : null,
+  ].filter((module): module is NonNullable<typeof module> => module != null);
+  return createOpenClawConnector({
+    modules,
     adapters: {
       openai: openaiAdapter,
       anthropic: anthropicAdapter,

@@ -74,6 +74,10 @@ export type CompactionModuleConfig = {
   compactionPromptPath?: string;
   resumePrefixPrompt?: string;
   resumePrefixPromptPath?: string;
+  turnLocalCompaction?: {
+    enabled?: boolean;
+    archiveDir?: string;
+  };
 };
 
 export type CompactionStrategyContext = {

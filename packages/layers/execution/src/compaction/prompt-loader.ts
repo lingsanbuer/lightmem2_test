@@ -3,9 +3,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolvePromptText, type ResolvedPrompt } from "../semantic/prompt-loader.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_COMPACTION_PROMPT_PATH = join(__dirname, "prompts/default-compaction.md");
-const DEFAULT_RESUME_PREFIX_PROMPT_PATH = join(__dirname, "prompts/default-resume-prefix.md");
+function resolveModuleDir(): string | undefined {
+  if (typeof __dirname === "string" && __dirname.length > 0) {
+    return __dirname;
+  }
+  const importMetaUrl =
+    typeof import.meta !== "undefined" && typeof import.meta.url === "string"
+      ? import.meta.url
+      : undefined;
+  return importMetaUrl ? dirname(fileURLToPath(importMetaUrl)) : undefined;
+}
+
+const MODULE_DIR = resolveModuleDir();
+const DEFAULT_COMPACTION_PROMPT_PATH = MODULE_DIR
+  ? join(MODULE_DIR, "prompts/default-compaction.md")
+  : undefined;
+const DEFAULT_RESUME_PREFIX_PROMPT_PATH = MODULE_DIR
+  ? join(MODULE_DIR, "prompts/default-resume-prefix.md")
+  : undefined;
 
 export const DEFAULT_COMPACTION_PROMPT_FALLBACK = `You are performing a CONTEXT CHECKPOINT COMPACTION.
 Create a handoff summary for another LLM that will resume the task.
@@ -27,7 +42,10 @@ duplicating work. Here is the summary produced by the other
 language model, use the information in this summary to assist
 with your own analysis:`;
 
-async function loadFallback(path: string, fallback: string): Promise<string> {
+async function loadFallback(path: string | undefined, fallback: string): Promise<string> {
+  if (!path) {
+    return fallback;
+  }
   try {
     return (await readFile(path, "utf8")).trim();
   } catch {
