@@ -3,7 +3,7 @@ import type {
   CompactionPlan,
   CompactionStrategyContext,
   RecentMessage,
-} from "./types.js";
+} from "../types.js";
 
 const clipText = (value: unknown): string => String(value ?? "").trim();
 

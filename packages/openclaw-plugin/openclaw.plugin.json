@@ -79,7 +79,12 @@
           "compaction": {
             "type": "boolean",
             "default": true,
-            "description": "Enable compaction execution module (includes summary and handoff atomics)."
+            "description": "Enable event-driven compaction execution module."
+          },
+          "eviction": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable eviction execution module interface (currently noop scaffold)."
           },
           "decisionLedger": {
             "type": "boolean",
@@ -91,7 +96,7 @@
       "compaction": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Compaction and summary controls for the shadow runtime pipeline.",
+        "description": "Compaction and summary controls for the proxy runtime pipeline.",
         "properties": {
           "enabled": {
             "type": "boolean",
@@ -100,7 +105,7 @@
           "autoForkOnPolicy": {
             "type": "boolean",
             "default": true,
-            "description": "Apply generated compaction plans by forking a new shadow physical session."
+            "description": "Apply generated compaction plans by forking a new physical session branch."
           },
           "summaryGenerationMode": {
             "type": "string",
@@ -197,6 +202,30 @@
           }
         }
       },
+      "eviction": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Eviction policy interface scaffold. Current runtime behavior is noop; fields are reserved for upcoming eviction implementations.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "policy": {
+            "type": "string",
+            "enum": ["noop", "lru", "lfu", "gdsf", "model_scored"],
+            "default": "noop"
+          },
+          "maxCandidateBlocks": {
+            "type": "number",
+            "description": "Reserved upper bound for candidate blocks when eviction planner is enabled."
+          },
+          "minBlockChars": {
+            "type": "number",
+            "description": "Reserved minimum chars for a message/block to be considered by eviction planner."
+          }
+        }
+      },
       "semanticReduction": {
         "type": "object",
         "additionalProperties": false,
@@ -271,6 +300,27 @@
             }
           }
         }
+      },
+      "reduction": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Reduction engine controls for proxy execution path.",
+        "properties": {
+          "engine": {
+            "type": "string",
+            "enum": ["legacy", "layered"],
+            "default": "legacy",
+            "description": "legacy uses proxy-local reducer; layered delegates pass execution to layers/execution pipeline."
+          },
+          "triggerMinChars": {
+            "type": "number",
+            "description": "Minimum chars to trigger reduction candidate generation in proxy bridge path."
+          },
+          "maxToolChars": {
+            "type": "number",
+            "description": "Target max chars for tool payload trim in layered reduction engine."
+          }
+        }
       }
     }
   },
@@ -312,6 +362,9 @@
     },
     "semanticReduction": {
       "label": "Semantic Reduction"
+    },
+    "reduction": {
+      "label": "Reduction"
     }
   }
 }

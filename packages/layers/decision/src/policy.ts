@@ -28,6 +28,7 @@ import {
   analyzeCompaction,
   type CompactionDecision,
 } from "./compaction/index.js";
+import { analyzeEviction, type EvictionPolicy } from "./eviction/index.js";
 
 export type PolicyModuleConfig = {
   localityEnabled?: boolean;
@@ -54,6 +55,9 @@ export type PolicyModuleConfig = {
   reductionSemanticMinChars?: number;
   compactionEnabled?: boolean;
   compactionCooldownTurns?: number;
+  evictionEnabled?: boolean;
+  evictionPolicy?: EvictionPolicy;
+  evictionMinBlockChars?: number;
   requestCooldownTurns?: number;
   cacheJitterWindowTurns?: number;
   cacheMissRateThreshold?: number;
@@ -92,6 +96,11 @@ export type PolicyOnlineConfigSnapshot = {
   compaction: {
     enabled: boolean;
     cooldownTurns: number;
+  };
+  eviction: {
+    enabled: boolean;
+    policy: EvictionPolicy;
+    minBlockChars: number;
   };
   turnLocal: {
     enabled: boolean;
@@ -139,6 +148,7 @@ export type PolicyOnlineSignals = {
   handoffReasons: string[];
   reductionReasons: string[];
   compactionReasons: string[];
+  evictionReasons: string[];
   locality: {
     source: PolicyLocalityAnalysis["source"];
     signalCount: number;
@@ -231,6 +241,15 @@ export type PolicyCompactionDecision = {
   arbitration: PolicySemanticArbitration;
 };
 
+export type PolicyEvictionDecision = {
+  enabled: boolean;
+  policy: EvictionPolicy;
+  blocks: number;
+  instructions: number;
+  estimatedSavedChars: number;
+  reasons: string[];
+};
+
 export type PolicyCacheHealthDecision = {
   enabled: boolean;
   supported: boolean;
@@ -290,6 +309,7 @@ export type PolicyOnlineDecisions = {
     arbitration: PolicySemanticArbitration;
     instructions: CompactionInstruction[];
   };
+  eviction: PolicyEvictionDecision;
   locality: PolicyLocalityDecision;
   cacheHealth: PolicyCacheHealthDecision;
   semantic: PolicySemanticBudgetDecision;
@@ -338,6 +358,9 @@ type NormalizedPolicyConfig = {
   reductionSemanticMinChars: number;
   compactionEnabled: boolean;
   compactionCooldownTurns: number;
+  evictionEnabled: boolean;
+  evictionPolicy: EvictionPolicy;
+  evictionMinBlockChars: number;
   requestCooldownTurns: number;
   cacheJitterWindowTurns: number;
   cacheMissRateThreshold: number;
@@ -368,6 +391,13 @@ type PolicyAnalysis = {
   reductionInstructions: ReductionInstruction[];
   compactionReasons: string[];
   compactionInstructions: CompactionInstruction[];
+  evictionReasons: string[];
+  evictionDecision: {
+    policy: EvictionPolicy;
+    blocks: number;
+    instructions: number;
+    estimatedSavedChars: number;
+  };
   locality: PolicyLocalityAnalysis;
   roi: PolicyOnlineRoiSnapshot;
   summaryCooldownActive: boolean;
@@ -563,6 +593,9 @@ function normalizeConfig(cfg: PolicyModuleConfig): NormalizedPolicyConfig {
     reductionSemanticMinChars: Math.max(1, cfg.reductionSemanticMinChars ?? 4000),
     compactionEnabled: cfg.compactionEnabled ?? true,
     compactionCooldownTurns: Math.max(0, cfg.compactionCooldownTurns ?? 6),
+    evictionEnabled: cfg.evictionEnabled ?? false,
+    evictionPolicy: cfg.evictionPolicy ?? "noop",
+    evictionMinBlockChars: Math.max(16, cfg.evictionMinBlockChars ?? 256),
     requestCooldownTurns: Math.max(0, cfg.requestCooldownTurns ?? 2),
     cacheJitterWindowTurns: Math.max(3, cfg.cacheJitterWindowTurns ?? 6),
     cacheMissRateThreshold: Math.min(1, Math.max(0, cfg.cacheMissRateThreshold ?? 0.5)),
@@ -664,6 +697,11 @@ function analyzePolicyBeforeBuild(
 
   // Analyze segments for compaction opportunities
   const compactionDecision = analyzeCompaction(ctx.segments);
+  const evictionDecision = analyzeEviction(ctx.segments, {
+    enabled: config.evictionEnabled,
+    policy: config.evictionPolicy,
+    minBlockChars: config.evictionMinBlockChars,
+  });
 
   const stableTokens = estimateTokensFromChars(stableChars);
   const promptTokensEstimate = estimateTokensFromChars(promptChars);
@@ -818,6 +856,15 @@ function analyzePolicyBeforeBuild(
   const compactionSupported = apiFamily === "openai-responses";
   const compactionReasons =
     compactionSupported && config.compactionEnabled ? collectSignalReasons(locality, "compaction") : [];
+  const evictionReasons: string[] = [];
+  if (config.evictionEnabled) {
+    evictionReasons.push(`eviction_policy=${evictionDecision.policy}`);
+    evictionReasons.push(`eviction_blocks=${evictionDecision.blocks.length}`);
+    evictionReasons.push(`eviction_instructions=${evictionDecision.instructions.length}`);
+    if ((evictionDecision.notes?.length ?? 0) > 0) {
+      evictionReasons.push(...(evictionDecision.notes ?? []));
+    }
+  }
 
   const reductionReasons: string[] = [];
   const reductionBeforeCallPassIds: string[] = [];
@@ -1059,6 +1106,13 @@ function analyzePolicyBeforeBuild(
     reductionInstructions: allReductionInstructions,
     compactionReasons: uniqueStrings(compactionReasons),
     compactionInstructions: compactionDecision.instructions,
+    evictionReasons: uniqueStrings(evictionReasons),
+    evictionDecision: {
+      policy: evictionDecision.policy,
+      blocks: evictionDecision.blocks.length,
+      instructions: evictionDecision.instructions.length,
+      estimatedSavedChars: evictionDecision.estimatedSavedChars,
+    },
     locality,
     roi,
     summaryCooldownActive,
@@ -1120,6 +1174,11 @@ function buildPolicyMetadata(
         enabled: config.compactionEnabled,
         cooldownTurns: config.compactionCooldownTurns,
       },
+      eviction: {
+        enabled: config.evictionEnabled,
+        policy: config.evictionPolicy,
+        minBlockChars: config.evictionMinBlockChars,
+      },
       turnLocal: {
         enabled: config.turnLocalCompactionEnabled,
         delayTurns: config.turnLocalCompactionDelayTurns,
@@ -1164,6 +1223,7 @@ function buildPolicyMetadata(
       handoffReasons: analysis.handoffReasons,
       reductionReasons: analysis.reductionReasons,
       compactionReasons: analysis.compactionReasons,
+      evictionReasons: analysis.evictionReasons,
       locality: {
         source: analysis.locality.source,
         signalCount: analysis.locality.signalCount,
@@ -1228,6 +1288,14 @@ function buildPolicyMetadata(
         generationMode: analysis.compactionGenerationMode,
         arbitration: analysis.compactionArbitration,
         instructions: analysis.compactionInstructions,
+      },
+      eviction: {
+        enabled: config.evictionEnabled,
+        policy: analysis.evictionDecision.policy,
+        blocks: analysis.evictionDecision.blocks,
+        instructions: analysis.evictionDecision.instructions,
+        estimatedSavedChars: analysis.evictionDecision.estimatedSavedChars,
+        reasons: analysis.evictionReasons,
       },
       locality: {
         enabled: config.locality.enabled,
@@ -1301,6 +1369,22 @@ export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule 
             toolPayloadChars: policy.signals.reductionToolPayloadChars,
             localityReductionChars: policy.signals.locality.reductionCandidateChars,
             roi: policy.roi.reduction,
+            apiFamily,
+          },
+        });
+      }
+
+      if (policy.decisions.eviction.enabled) {
+        nextCtx = appendContextEvent(nextCtx, {
+          type: ECOCLAW_EVENT_TYPES.POLICY_EVICTION_DECIDED,
+          source: "module-policy",
+          at: new Date().toISOString(),
+          payload: {
+            policy: policy.decisions.eviction.policy,
+            blocks: policy.decisions.eviction.blocks,
+            instructions: policy.decisions.eviction.instructions,
+            estimatedSavedChars: policy.decisions.eviction.estimatedSavedChars,
+            reasons: policy.decisions.eviction.reasons,
             apiFamily,
           },
         });

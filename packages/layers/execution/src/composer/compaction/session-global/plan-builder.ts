@@ -3,7 +3,7 @@ import type {
   CompactionStrategy,
   CompactionStrategyContext,
   CompactionStrategyRegistry,
-} from "./types.js";
+} from "../types.js";
 import { resolveCompactionStrategy } from "./strategy-registry.js";
 
 export type BuildCompactionPlanParams = CompactionStrategyContext & {

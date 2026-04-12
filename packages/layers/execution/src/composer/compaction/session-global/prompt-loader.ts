@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolvePromptText, type ResolvedPrompt } from "../../atomic/semantic/prompt-loader.js";
+import { resolvePromptText, type ResolvedPrompt } from "../../../atomic/semantic/prompt-loader.js";
 
 function resolveModuleDir(): string | undefined {
   if (typeof __dirname === "string" && __dirname.length > 0) {

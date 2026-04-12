@@ -33,8 +33,9 @@ Physical package layout now mirrors the semantic layers:
 
 - `module-stabilizer`: prefix stabilization, candidate evaluation, and cache-tree registration.
 - `module-summary`: builds handoff summary artifacts when requested by policy.
-- `module-compaction`: converts a summary artifact into a concrete compaction plan.
+- `module-compaction`: event-driven compaction executor that applies policy-selected compaction instructions.
 - `module-reduction`: response/tool-content reduction and pruning for budget control.
+- `module-eviction`: eviction-planning execution boundary (currently interface scaffold, noop runtime).
 
 ### Orchestration Layer
 
@@ -88,4 +89,5 @@ EcoClaw persistence (filesystem-first):
 
 - L1.1: task-router + policy decision replay for offline tuning.
 - L1.2: orchestration-side compaction execution refinements on top of the new plan boundary.
+- L1.3: eviction block abstraction + baseline policies (LRU/LFU/GDSF) on top of the scaffolded interface.
 - L2+: learned/dynamic policies (optional, gated by offline metrics quality).

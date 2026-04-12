@@ -287,31 +287,41 @@ export const repeatedReadDedupPass: ReductionPassHandler = {
         ? turnCtx.metadata.workspaceDir
         : undefined;
 
-    const nextSegments = turnCtx.segments.map((segment) => {
-      if (!dedupSegmentIds.has(segment.id)) return segment;
+    const nextSegments: ContextSegment[] = [];
+    for (const segment of turnCtx.segments) {
+      if (!dedupSegmentIds.has(segment.id)) {
+        nextSegments.push(segment);
+        continue;
+      }
 
       const firstReadSegment = firstReadMap.get(segment.id);
-      if (!firstReadSegment) return segment;
+      if (!firstReadSegment) {
+        nextSegments.push(segment);
+        continue;
+      }
 
-      // Deduplicate this segment
+      const dedupResult = await deduplicateRead(
+        segment,
+        turnCtx.sessionId,
+        firstReadSegment,
+        config,
+        workspaceDir,
+      );
+      if (!dedupResult.changed) {
+        nextSegments.push(segment);
+        continue;
+      }
+
       const meta = asObject(segment.metadata) ?? {};
-      const toolName = normalizeToolName(meta) ?? "read";
-      const dataKey = extractDataKey(meta) ?? "unknown";
-
-      const archiveDir = config.archiveDir ?? defaultArchiveDir(turnCtx.sessionId, workspaceDir);
-      const timestamp = Date.now();
-      const fileName = `${timestamp}-${sanitizePathPart(segment.id)}.json`;
-      const archivePath = join(archiveDir, fileName);
-      archivePaths.push(archivePath);
-
+      if (dedupResult.archivePath) {
+        archivePaths.push(dedupResult.archivePath);
+      }
       touchedSegmentIds.push(segment.id);
       totalSavedChars += segment.text.length;
 
-      const stub = buildDedupStub(toolName, dataKey, firstReadSegment.text.length, archivePath, 0);
-
-      return {
+      nextSegments.push({
         ...segment,
-        text: stub,
+        text: dedupResult.text,
         metadata: {
           ...meta,
           reduction: {
@@ -320,11 +330,12 @@ export const repeatedReadDedupPass: ReductionPassHandler = {
               deduplicated: true,
               originalSize: segment.text.length,
               firstReadSegmentId: firstReadSegment.id,
+              archivePath: dedupResult.archivePath,
             },
           },
         },
-      };
-    });
+      });
+    }
 
     if (touchedSegmentIds.length === 0) {
       return {

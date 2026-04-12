@@ -3,7 +3,7 @@ import type {
   CompactionPlanBuilder,
   CompactionStrategy,
   CompactionStrategyRegistry,
-} from "./types.js";
+} from "../types.js";
 
 const BUILTIN_STRATEGIES: Record<CompactionStrategy, CompactionPlanBuilder> = {
   summary_then_fork: buildSummaryThenForkPlan,

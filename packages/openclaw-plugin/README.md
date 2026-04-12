@@ -348,7 +348,7 @@ The compaction harness:
 - sends three real turns through the same OpenClaw session
 - verifies turn 2 emits `policy.compaction.requested -> compaction.plan.generated -> compaction.apply.executed`
 - verifies `summary.generated` only when summary policy was independently requested for that same turn
-- verifies turn 3 is routed onto the newly forked shadow physical session
+- verifies turn 3 is routed onto the newly forked physical session branch
 - restores the original OpenClaw config unless `KEEP_CONFIG=1`
 
 Run the summary end-to-end harness:

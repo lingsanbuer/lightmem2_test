@@ -8,3 +8,6 @@ export * from "./compaction/index.js";
 
 // Reduction module
 export * from "./reduction/index.js";
+
+// Eviction module
+export * from "./eviction/index.js";

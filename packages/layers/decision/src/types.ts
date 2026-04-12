@@ -103,8 +103,11 @@ export type ReductionDecision = {
  * Compaction strategy types for context window management
  */
 export type CompactionStrategy =
-  | "turn_local_evidence_compaction"  // Compact reads consumed by writes
-  | "checkpoint_summary"              // Generate summary for checkpoint
+  | "turn_local_evidence_compaction"  // Legacy: compact reads consumed by writes
+  | "tool_result_handle"              // Event-driven: compact finished tool payload into handle
+  | "subtask_seed"                    // Event-driven: compact completed subtask history into seed
+  | "error_path_record"               // Event-driven: compact failed path into minimal error record
+  | "checkpoint_summary"              // Legacy: session-level checkpoint summary
   | (string & {});                     // Extensible
 
 /**
@@ -135,5 +138,59 @@ export type CompactionDecision = {
   /** Total chars that could be saved by following instructions */
   estimatedSavedChars: number;
   /** Notes about the decision */
+  notes?: string[];
+};
+
+// ============================================================================
+// Eviction Decision Types
+// ============================================================================
+
+/**
+ * Eviction policy families. These are placeholders for future implementations.
+ */
+export type EvictionPolicy =
+  | "noop"
+  | "lru"
+  | "lfu"
+  | "gdsf"
+  | "model_scored"
+  | (string & {});
+
+/**
+ * Logical cache block used by eviction planning.
+ */
+export type EvictionBlock = {
+  id: string;
+  messageIds: string[];
+  blockType: string;
+  chars: number;
+  approxTokens: number;
+  recencyRank?: number;
+  frequency?: number;
+  regenerationCost?: number;
+  metadata?: Record<string, unknown>;
+};
+
+/**
+ * Instruction for a single eviction operation.
+ */
+export type EvictionInstruction = {
+  blockId: string;
+  confidence: number;
+  priority: number;
+  rationale: string;
+  estimatedSavedChars: number;
+  parameters?: Record<string, unknown>;
+};
+
+/**
+ * Decision output from Policy to Eviction module.
+ */
+export type EvictionDecision = {
+  enabled: boolean;
+  policy: EvictionPolicy;
+  blocks: EvictionBlock[];
+  instructions: EvictionInstruction[];
+  estimatedSavedChars: number;
   notes?: string[];
 };
