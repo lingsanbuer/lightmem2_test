@@ -308,9 +308,9 @@
         "properties": {
           "engine": {
             "type": "string",
-            "enum": ["legacy", "layered"],
-            "default": "legacy",
-            "description": "legacy uses proxy-local reducer; layered delegates pass execution to layers/execution pipeline."
+            "enum": ["layered"],
+            "default": "layered",
+            "description": "Reduction delegates pass execution to layers/execution pipeline."
           },
           "triggerMinChars": {
             "type": "number",

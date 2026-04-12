@@ -83,7 +83,7 @@ test("connector materializes an edited branch and persists synthetic messages", 
       stateStore: store,
       stateDir,
       routing: {
-        physicalSessionPrefix: "shadow",
+        physicalSessionPrefix: "phytest",
       },
     });
     const sourceCtx = createTurnContext("session-draft");
@@ -186,7 +186,7 @@ test("compaction plan uses generic branch materialization flow", async () => {
       stateStore: store,
       stateDir,
       routing: {
-        physicalSessionPrefix: "shadow",
+        physicalSessionPrefix: "phytest",
       },
     });
 

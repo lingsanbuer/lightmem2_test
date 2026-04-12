@@ -13,7 +13,6 @@ import {
 } from "../../layers/execution/src/composer/reduction/pipeline.ts";
 import type { ContextSegment, RuntimeTurnContext, RuntimeTurnResult } from "../../kernel/src/types.ts";
 import {
-  applyRootPromptRewriteToChatMessages,
   prependTextToContent,
   type RootPromptRewrite,
   rewriteRootPromptForStablePrefix,
@@ -90,7 +89,7 @@ type EcoClawPluginConfig = {
     };
   };
   reduction?: {
-    engine?: "legacy" | "layered";
+    engine?: "layered";
     triggerMinChars?: number;
     maxToolChars?: number;
   };
@@ -455,7 +454,7 @@ function normalizeConfig(raw: unknown): Required<Omit<EcoClawPluginConfig, "prox
       },
     },
     reduction: {
-      engine: reduction.engine === "layered" ? "layered" : "legacy",
+      engine: "layered",
       triggerMinChars: Math.max(256, reduction.triggerMinChars ?? 2200),
       maxToolChars: Math.max(256, reduction.maxToolChars ?? 1200),
     },
@@ -705,66 +704,6 @@ function isLikelyToolLikeInputItem(item: any): boolean {
   if (typeof item.tool_call_id === "string" && item.tool_call_id.trim().length > 0) return true;
   if (typeof item.toolCallId === "string" && item.toolCallId.trim().length > 0) return true;
   return false;
-}
-
-function summarizeJsonText(text: string): string {
-  const compact = normalizeWhitespace(text);
-  const preview = compact.slice(0, 1200);
-  const keys = Array.from(new Set((compact.match(/"([A-Za-z0-9_.-]{1,64})"\s*:/g) ?? [])
-    .map((match) => match.replace(/"\s*:$/, "").replace(/^"/, "").replace(/"$/, ""))
-    .slice(0, 20)));
-  return [
-    `[reduction/json] chars=${text.length}`,
-    keys.length > 0 ? `keys=${keys.join(",")}` : "keys=(none)",
-    `preview=${preview}`,
-  ].join("\n");
-}
-
-function summarizeHtmlText(text: string): string {
-  const cleaned = text
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-  const compact = normalizeWhitespace(cleaned);
-  return `[reduction/html] chars=${text.length}\npreview=${compact.slice(0, 1400)}`;
-}
-
-function summarizeBlobText(text: string): string {
-  const digest = createHash("sha256").update(text).digest("hex").slice(0, 16);
-  return `[reduction/blob] chars=${text.length} sha256=${digest} preview=${text.slice(0, 80)}`;
-}
-
-function summarizeGenericText(text: string): string {
-  const head = text.slice(0, 1000);
-  const tail = text.length > 1300 ? text.slice(-260) : "";
-  return tail.length > 0
-    ? `[reduction/text] chars=${text.length}\nhead=${head}\n...\ntail=${tail}`
-    : `[reduction/text] chars=${text.length}\nhead=${head}`;
-}
-
-function reduceLargePayloadText(
-  text: string,
-  triggerMinChars: number,
-): { reduced: string; changed: boolean; kind: string } {
-  if (text.length < triggerMinChars) return { reduced: text, changed: false, kind: "skip_small" };
-  const trimmed = text.trim();
-  const lowered = trimmed.toLowerCase();
-  if (/^data:[^;]+;base64,/i.test(trimmed) || /[A-Za-z0-9+/]{1800,}={0,2}/.test(trimmed)) {
-    return { reduced: summarizeBlobText(text), changed: true, kind: "blob" };
-  }
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-    try {
-      JSON.parse(trimmed);
-      return { reduced: summarizeJsonText(text), changed: true, kind: "json" };
-    } catch {
-      // fallthrough
-    }
-  }
-  if (/<(html|body|head|div|span|section|article|main|table|script|style)\b/i.test(lowered)) {
-    return { reduced: summarizeHtmlText(text), changed: true, kind: "html" };
-  }
-  return { reduced: summarizeGenericText(text), changed: true, kind: "text" };
 }
 
 type ProxyReductionBinding =
@@ -1076,7 +1015,7 @@ type ProxyReductionResult = {
   changedBlocks: number;
   savedChars: number;
   diagnostics?: {
-    engine: "legacy" | "layered";
+    engine: "layered";
     inputItems: number;
     toolLikeItems: number;
     candidateBlocks: number;
@@ -1246,146 +1185,17 @@ function applyLayeredReductionToInput(
   });
 }
 
-function applyLegacyProxyReductionToInput(payload: any, triggerMinChars: number, maxToolChars: number): ProxyReductionResult {
-  if (!Array.isArray(payload?.input)) {
-    return {
-      changedItems: 0,
-      changedBlocks: 0,
-      savedChars: 0,
-      diagnostics: {
-        engine: "legacy",
-        inputItems: 0,
-        toolLikeItems: 0,
-        candidateBlocks: 0,
-        overThresholdBlocks: 0,
-        triggerMinChars,
-        maxToolChars,
-        instructionCount: 0,
-        passCount: 0,
-        skippedReason: "no_input_array",
-      },
-    };
-  }
-  let changedItems = 0;
-  let changedBlocks = 0;
-  let savedChars = 0;
-  let toolLikeItems = 0;
-  let candidateBlocks = 0;
-  let overThresholdBlocks = 0;
-
-  payload.input = payload.input.map((item: any) => {
-    if (!isLikelyToolLikeInputItem(item)) return item;
-    toolLikeItems += 1;
-    let nextItem = item;
-    let localChanged = false;
-
-    const maybeReduceField = (fieldName: string): void => {
-      const text = nextItem?.[fieldName];
-      if (typeof text !== "string") return;
-      candidateBlocks += 1;
-      if (text.length >= triggerMinChars) overThresholdBlocks += 1;
-      const out = reduceLargePayloadText(text, triggerMinChars);
-      if (!out.changed) return;
-      localChanged = true;
-      changedBlocks += 1;
-      savedChars += Math.max(0, text.length - out.reduced.length);
-      nextItem = {
-        ...nextItem,
-        [fieldName]: out.reduced,
-      };
-    };
-
-    // OpenAI Responses turns often carry tool payload in top-level fields.
-    maybeReduceField("arguments");
-    maybeReduceField("output");
-    maybeReduceField("result");
-
-    if (typeof item.content === "string") {
-      candidateBlocks += 1;
-      if (item.content.length >= triggerMinChars) overThresholdBlocks += 1;
-      const out = reduceLargePayloadText(item.content, triggerMinChars);
-      if (out.changed) {
-        localChanged = true;
-        changedBlocks += 1;
-        savedChars += Math.max(0, item.content.length - out.reduced.length);
-        nextItem = {
-          ...nextItem,
-          content: out.reduced,
-          ecoclawReductionKind: out.kind,
-        };
-      }
-    }
-    if (Array.isArray(item.content)) {
-      const nextContent = item.content.map((block: any) => {
-        if (!block || typeof block !== "object") return block;
-        const blockText = typeof block.text === "string"
-          ? block.text
-          : typeof block.content === "string"
-            ? block.content
-            : "";
-        if (!blockText) return block;
-        candidateBlocks += 1;
-        if (blockText.length >= triggerMinChars) overThresholdBlocks += 1;
-        const out = reduceLargePayloadText(blockText, triggerMinChars);
-        if (!out.changed) return block;
-        localChanged = true;
-        changedBlocks += 1;
-        savedChars += Math.max(0, blockText.length - out.reduced.length);
-        if (typeof block.text === "string") {
-          return { ...block, text: out.reduced, ecoclawReductionKind: out.kind };
-        }
-        return { ...block, content: out.reduced, ecoclawReductionKind: out.kind };
-      });
-      if (localChanged) {
-        nextItem = { ...nextItem, content: nextContent };
-      }
-    }
-    if (!localChanged) return item;
-    changedItems += 1;
-    return nextItem;
-  });
-
-  return {
-    changedItems,
-    changedBlocks,
-    savedChars,
-    diagnostics: {
-      engine: "legacy",
-      inputItems: payload.input.length,
-      toolLikeItems,
-      candidateBlocks,
-      overThresholdBlocks,
-      triggerMinChars,
-      maxToolChars,
-      instructionCount: 0,
-      passCount: 0,
-      skippedReason:
-        candidateBlocks === 0
-          ? "no_candidate_blocks"
-          : overThresholdBlocks === 0
-            ? "below_trigger_min_chars"
-            : changedBlocks === 0
-              ? "pipeline_no_effect"
-              : undefined,
-    },
-  };
-}
-
 function applyProxyReductionToInput(
   payload: any,
   options?: {
-    engine?: "legacy" | "layered";
+    engine?: "layered";
     triggerMinChars?: number;
     maxToolChars?: number;
   },
 ): Promise<ProxyReductionResult> | ProxyReductionResult {
-  const engine = options?.engine === "layered" ? "layered" : "legacy";
   const triggerMinChars = Math.max(256, options?.triggerMinChars ?? 2200);
   const maxToolChars = Math.max(256, options?.maxToolChars ?? 1200);
-  if (engine === "layered") {
-    return applyLayeredReductionToInput(payload, maxToolChars, triggerMinChars);
-  }
-  return applyLegacyProxyReductionToInput(payload, triggerMinChars, maxToolChars);
+  return applyLayeredReductionToInput(payload, maxToolChars, triggerMinChars);
 }
 
 function extractProxyResponseText(parsedResponse: any): string {
@@ -2274,199 +2084,6 @@ async function startEmbeddedResponsesProxy(
   };
 }
 
-function maybeInstallProviderTrafficTap(
-  cfg: ReturnType<typeof normalizeConfig>,
-  logger: Required<PluginLogger>,
-): void {
-  const g = globalThis as any;
-  if (g.__ecoclaw_provider_tap_installed__) return;
-  const origFetch = g.fetch;
-  if (typeof origFetch !== "function") {
-    logger.warn("[ecoclaw] provider interception requested but global fetch is unavailable.");
-    return;
-  }
-
-  g.__ecoclaw_provider_tap_installed__ = true;
-  g.fetch = async (input: any, init?: any) => {
-    let effectiveInput = input;
-    let effectiveInit = init;
-    let url = "";
-    try {
-      url =
-        typeof effectiveInput === "string"
-          ? effectiveInput
-          : typeof effectiveInput?.url === "string"
-            ? effectiveInput.url
-            : "";
-    } catch {
-      url = "";
-    }
-    const lower = url.toLowerCase();
-    const isResponsesCall = lower.includes("/responses");
-    const isChatCompletionsCall = lower.includes("/chat/completions");
-    const isProviderCall = isResponsesCall || isChatCompletionsCall;
-
-    let reqBody = "";
-    let bodySource: "init" | "request" | "none" = "none";
-    if (isProviderCall) {
-      try {
-        if (typeof effectiveInit?.body === "string") {
-          reqBody = effectiveInit.body;
-          bodySource = "init";
-        } else if (effectiveInput && typeof effectiveInput.clone === "function") {
-          const clone = effectiveInput.clone();
-          reqBody = await clone.text();
-          bodySource = reqBody ? "request" : "none";
-        }
-      } catch {
-        reqBody = "";
-        bodySource = "none";
-      }
-    }
-
-    if (isProviderCall && reqBody) {
-      try {
-        const parsedBody = JSON.parse(reqBody);
-        let rootPromptRewrite: RootPromptRewrite | null = null;
-        if (isResponsesCall) {
-          const devAndUser = findDeveloperAndPrimaryUser(parsedBody?.input);
-          rootPromptRewrite = devAndUser
-            ? rewriteRootPromptForStablePrefix(devAndUser.developerText)
-            : null;
-          if (
-            devAndUser &&
-            rootPromptRewrite &&
-            Array.isArray(parsedBody?.input) &&
-            devAndUser.developerIndex >= 0 &&
-            rootPromptRewrite.changed
-          ) {
-            parsedBody.input[devAndUser.developerIndex] = {
-              ...(devAndUser.developerItem ?? parsedBody.input[devAndUser.developerIndex]),
-              role: "developer",
-              content: rootPromptRewrite.forwardedPromptText,
-            };
-            if (rootPromptRewrite.dynamicContextText && devAndUser.userIndex >= 0) {
-              parsedBody.input[devAndUser.userIndex] = {
-                ...(devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex]),
-                role: "user",
-                content: prependTextToContent(
-                  (devAndUser.userItem ?? parsedBody.input[devAndUser.userIndex])?.content,
-                  rootPromptRewrite.dynamicContextText,
-                ),
-              };
-            }
-          }
-        } else if (isChatCompletionsCall && Array.isArray(parsedBody?.messages)) {
-          const rewrittenMessages = applyRootPromptRewriteToChatMessages(parsedBody.messages);
-          parsedBody.messages = rewrittenMessages.messages;
-          rootPromptRewrite = rewrittenMessages.rewrite;
-        }
-        const originalPromptCacheKey =
-          typeof parsedBody?.prompt_cache_key === "string" && parsedBody.prompt_cache_key.trim().length > 0
-            ? String(parsedBody.prompt_cache_key)
-            : "";
-        const stableRewrite = rewritePayloadForStablePrefix(parsedBody, String(parsedBody?.model ?? ""));
-        const reductionAlreadyApplied = parsedBody?.__ecoclaw_reduction_applied === true;
-        const reductionApplied =
-          cfg.modules.reduction && !reductionAlreadyApplied
-            ? await applyProxyReductionToInput(parsedBody, {
-              engine: cfg.reduction.engine,
-              triggerMinChars: cfg.reduction.triggerMinChars,
-              maxToolChars: cfg.reduction.maxToolChars,
-            })
-            : { changedItems: 0, changedBlocks: 0, savedChars: 0 };
-        if (cfg.modules.reduction && !reductionAlreadyApplied) {
-          parsedBody.__ecoclaw_reduction_applied = true;
-        }
-        stripInternalPayloadMarkers(parsedBody);
-        if (isResponsesCall) {
-          parsedBody.prompt_cache_retention = "24h";
-        }
-        const rewrittenBody = JSON.stringify(parsedBody);
-        reqBody = rewrittenBody;
-        if (bodySource === "init") {
-          effectiveInit = {
-            ...(effectiveInit ?? {}),
-            body: rewrittenBody,
-          };
-        } else if (bodySource === "request" && effectiveInput && typeof Request !== "undefined" && effectiveInput instanceof Request) {
-          effectiveInput = new Request(effectiveInput, {
-            method: effectiveInput.method,
-            headers: new Headers(effectiveInput.headers),
-            body: rewrittenBody,
-          });
-        }
-        await appendJsonl(cfg.debugTapPath, {
-          at: new Date().toISOString(),
-          stage: "provider_rewrite",
-          url,
-          originalPromptCacheKey,
-          rewrittenPromptCacheKey: stableRewrite.promptCacheKey,
-          userContentRewrites: stableRewrite.userContentRewrites,
-          senderMetadataBlocksBefore: stableRewrite.senderMetadataBlocksBefore,
-          senderMetadataBlocksAfter: stableRewrite.senderMetadataBlocksAfter,
-          reductionChangedItems: reductionApplied.changedItems,
-          reductionChangedBlocks: reductionApplied.changedBlocks,
-          reductionSavedChars: reductionApplied.savedChars,
-          reductionDiagnostics: (reductionApplied as ProxyReductionResult).diagnostics,
-          developerPromptRewritten: Boolean(rootPromptRewrite?.changed),
-          developerRewriteWorkdir: rootPromptRewrite?.workdir ?? "",
-          developerRewriteAgentId: rootPromptRewrite?.agentId ?? "",
-          bodySource,
-        });
-      } catch {
-        // Ignore non-JSON provider bodies.
-      }
-    }
-
-    const startedAt = new Date().toISOString();
-    const method = String(effectiveInit?.method ?? effectiveInput?.method ?? "GET").toUpperCase();
-    const res = await origFetch(effectiveInput, effectiveInit);
-
-    if (isProviderCall) {
-      void (async () => {
-        try {
-          const clone = res.clone();
-          const txt = await clone.text();
-          let parsed: any = undefined;
-          try {
-            parsed = JSON.parse(txt);
-          } catch {
-            parsed = undefined;
-          }
-          const usage =
-            parsed?.usage ??
-            parsed?.response?.usage ??
-            parsed?.data?.usage ??
-            undefined;
-          const responseText = extractProviderResponseText(txt, parsed);
-          const rec = {
-            at: startedAt,
-            method,
-            url,
-            status: Number((res as any)?.status ?? 0),
-            requestBody: reqBody || undefined,
-            responseUsage: usage || undefined,
-            responseText: responseText || undefined,
-            responseBody: parsed ?? (txt ? txt.slice(0, 4000) : undefined),
-          };
-          await appendJsonl(cfg.debugTapPath, rec);
-        } catch (err) {
-          logger.warn(
-            `[ecoclaw] provider tap write failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      })();
-    }
-    return res;
-  };
-  if (cfg.debugTapProviderTraffic) {
-    logger.info(`[ecoclaw] Provider interception enabled. tap=${cfg.debugTapPath}`);
-  } else {
-    logger.debug(`[ecoclaw] Provider interception enabled. tap=${cfg.debugTapPath}`);
-  }
-}
-
 function toJsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value == null) return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -3095,7 +2712,6 @@ module.exports = {
       return proxyInitPromise;
     };
 
-    maybeInstallProviderTrafficTap(cfg, logger);
     installLlmHookTap(api, cfg, logger);
     registerEcoClawCommand(api, logger, topology, cfg);
     hookOn(api, "session_start", (event: any) => {
