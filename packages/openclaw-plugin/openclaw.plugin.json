@@ -1,11 +1,11 @@
 {
   "id": "ecoclaw",
   "kind": "runtime",
-  "name": "EcoClaw Runtime Optimizer",
+  "name": "TokenPilot Runtime Optimizer",
   "version": "0.1.0",
   "description": "Token-efficiency runtime plugin for OpenClaw with pluggable routing and optimization hooks.",
-  "author": "EcoClaw",
-  "homepage": "https://github.com/Xubqpanda/EcoClaw",
+  "author": "TokenPilot",
+  "homepage": "https://github.com/Xubqpanda/TokenPilot",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -13,7 +13,7 @@
       "enabled": {
         "type": "boolean",
         "default": true,
-        "description": "Enable EcoClaw plugin hooks."
+        "description": "Enable TokenPilot plugin hooks."
       },
       "logLevel": {
         "type": "string",
@@ -35,7 +35,7 @@
       },
       "stateDir": {
         "type": "string",
-        "description": "Directory for EcoClaw plugin state (default: ~/.openclaw/ecoclaw-plugin-state)."
+        "description": "Directory for TokenPilot plugin state (default: ~/.openclaw/ecoclaw-plugin-state)."
       },
       "debugTapProviderTraffic": {
         "type": "boolean",

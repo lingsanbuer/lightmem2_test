@@ -1,4 +1,4 @@
-<h1 align="center">LightFlow: Lightweight and Efficient Continual Agents</h1>
+<h1 align="center">TokenPilot: Lightweight and Efficient Context Management for Lifelong Agents</h1>
 
 <p align="center">
   Stable Prefix, Reduction, and Task-Aware Eviction for Long-Running Agent Sessions
@@ -13,18 +13,18 @@
 </p>
 
 <p align="center">
-  LightFlow is a runtime system for cache-efficient continual agents. It reduces token cost in long-running single-session agent workloads through stable-prefix rewriting, request-time reduction, and task-aware eviction.
+  TokenPilot is a runtime system for cache-efficient continual agents. It reduces token cost in long-running single-session agent workloads through stable-prefix rewriting, request-time reduction, and task-aware eviction.
 </p>
 
 ---
-LightFlow targets the failure mode that appears when an agent keeps solving tasks inside one long session:
+TokenPilot targets the failure mode that appears when an agent keeps solving tasks inside one long session:
 
 - prompt history keeps growing
 - already-finished tasks remain in context
 - bulky tool outputs dominate later turns
 - cache reuse becomes unstable when prompt structure drifts
 
-The current LightFlow runtime focuses on three mechanisms:
+The current TokenPilot runtime focuses on three mechanisms:
 
 - **Stable Prefix** for better upstream cache reuse
 - **Reduction** for request-time local prompt slimming
@@ -34,14 +34,14 @@ The current LightFlow runtime focuses on three mechanisms:
 
 ## 📢 News
 
-- **[2026-05-01]** LightFlow is released.
+- **[2026-05-01]** TokenPilot is released.
 
 <span id='contents'/>
 
 ## 📑 Table of Contents
 
 * <a href='#news'>📢 News</a>
-* <a href='#why-ecoclaw'>🎯 Why LightFlow</a>
+* <a href='#why-tokenpilot'>🎯 Why TokenPilot</a>
 * <a href='#core-idea'>🧠 Core Idea</a>
 * <a href='#installation'>🔧 Installation</a>
 * <a href='#quickstart'>⚡ Quick Start</a>
@@ -50,9 +50,9 @@ The current LightFlow runtime focuses on three mechanisms:
 * <a href='#experimental-results'>📊 Experimental Results</a>
 * <a href='#bench'>🧪 Benchmark Repository</a>
 
-<span id='why-ecoclaw'/>
+<span id='why-tokenpilot'/>
 
-## 🎯 Why LightFlow
+## 🎯 Why TokenPilot
 
 Long-session agents are expensive for structural reasons, not just because tasks get harder over time.
 
@@ -63,20 +63,20 @@ The common failure pattern is:
 3. large tool results contaminate the active prompt window
 4. cache lineage becomes unstable when prompt prefixes drift across turns
 
-LightFlow addresses this by treating history as a **task-aware, rewriteable runtime object**, not as a raw transcript that must be replayed forever.
+TokenPilot addresses this by treating history as a **task-aware, rewriteable runtime object**, not as a raw transcript that must be replayed forever.
 
 <span id='core-idea'/>
 
 ## 🧠 Core Idea
 
-LightFlow reduces token cost at three levels.
+TokenPilot reduces token cost at three levels.
 
 ### 1. Stable Prefix
-LightFlow rewrites the cacheable prefix so repeated requests share a more stable prompt prefix across turns.
+TokenPilot rewrites the cacheable prefix so repeated requests share a more stable prompt prefix across turns.
 This improves upstream cache reuse and reduces unnecessary prompt churn.
 
 ### 2. Reduction
-LightFlow applies request-level local slimming to expensive prompt fragments such as:
+TokenPilot applies request-level local slimming to expensive prompt fragments such as:
 
 - repeated reads
 - oversized tool payloads
@@ -87,7 +87,7 @@ LightFlow applies request-level local slimming to expensive prompt fragments suc
 This is local prompt hygiene rather than long-term memory compression.
 
 ### 3. Task-Aware Eviction
-LightFlow maintains a canonical, task-aware history and tracks task lifecycle:
+TokenPilot maintains a canonical, task-aware history and tracks task lifecycle:
 
 - `active`
 - `completed`
@@ -103,8 +103,8 @@ This is the main mechanism that prevents continual-session history from growing 
 ## 🔧 Installation
 
 ```bash
-git clone <your-repo-url> ecoclaw && \
-cd ecoclaw && \
+git clone https://github.com/Xubqpanda/TokenPilot.git tokenpilot && \
+cd tokenpilot && \
 pnpm install && \
 pnpm build
 ```
@@ -123,7 +123,7 @@ The live architecture is best understood as two major phases.
 
 ### Phase 1: Pre-history processing
 
-Before content becomes durable history, LightFlow can:
+Before content becomes durable history, TokenPilot can:
 
 - stabilize prefix structure
 - reduce bulky prompt content
@@ -138,7 +138,7 @@ This phase is mostly implemented in:
 
 ### Phase 2: Post-history lifecycle management
 
-Once transcript content has been absorbed into canonical history, LightFlow can:
+Once transcript content has been absorbed into canonical history, TokenPilot can:
 
 - derive task-aware history state
 - update task registry
@@ -159,7 +159,7 @@ This phase is mostly implemented in:
 
 ### Continual Mode 
 
-Continual mode evaluates LightFlow under a **multi-task single-session** workload: tasks run sequentially inside one shared session, accumulating prompt history over time. The baseline runs without any optimization. The Decoupled + FIFO variants enable eviction with different turn-batch sizes.
+Continual mode evaluates TokenPilot under a **multi-task single-session** workload: tasks run sequentially inside one shared session, accumulating prompt history over time. The baseline runs without any optimization. The Decoupled + FIFO variants enable eviction with different turn-batch sizes.
 
 | Setting | Score | Total Tokens | Input Tokens | Cache Read Tokens |
 | :-- | --: | --: | --: | --:|
@@ -179,7 +179,7 @@ Continual mode evaluates LightFlow under a **multi-task single-session** workloa
 
 ### Isolated Mode
 
-Isolated mode evaluates LightFlow under **single-task isolated sessions**: each task runs in its own fresh session. LightFlow uses stable-prefix rewriting + reduction.
+Isolated mode evaluates TokenPilot under **single-task isolated sessions**: each task runs in its own fresh session. TokenPilot uses stable-prefix rewriting + reduction.
 
 | Setting | Score | Total Tokens | Input Tokens | Cache Read Tokens |
 | :-- | --: | --: | --: | --:|

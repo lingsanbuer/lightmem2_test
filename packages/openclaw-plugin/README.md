@@ -1,164 +1,70 @@
-# EcoClaw OpenClaw Plugin
+# OpenClaw Plugin
 
-This plugin adds a runtime optimization layer to OpenClaw and registers an
-explicit provider namespace:
+This package contains the live OpenClaw plugin runtime used by the project.
 
-- `ecoclaw/<model>` (example: `ecoclaw/gpt-5.4`)
+Current runtime responsibilities:
 
-It includes:
+- embedded responses proxy
+- stable-prefix rewriting
+- request-time reduction
+- tool-result persistence
+- canonical history rewrite and eviction
+- recovery protocol and recovery tool wiring
 
-- Embedded responses proxy
-- Stable-prefix cache reuse for OpenAI Responses-compatible providers
-- Cache/summary decision modules
-- Session topology + `/ecoclaw` command controls
-- JSONL event tracing for analysis
+For a higher-level semantic map of the current module boundaries, see:
 
-## 1) Release Install And Enable
+- [`docs/architecture/plugin-semantic-grouping.md`](/mnt/20t/xubuqiang/EcoClaw/EcoClaw/docs/architecture/plugin-semantic-grouping.md)
+
+## Install
+
+Release-style install:
 
 ```bash
-cd packages/openclaw-plugin
+cd /mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin
 npm run install:release
 ```
 
-Or in two explicit steps:
-
-```bash
-cd packages/openclaw-plugin
-npm run pack:release
-openclaw plugins install ./ecoclaw-*.tgz
-openclaw gateway restart
-```
-
-This is the recommended end-user path. It installs EcoClaw into:
+This installs the packaged plugin into:
 
 ```text
 ~/.openclaw/extensions/ecoclaw
 ```
 
-Recommended trusted plugin allowlist:
+Development-style install should use source build + runtime sync instead of
+mixing release and load-path installs. The current sanity workflow is:
+
+1. build the package
+2. sync the runtime artifact
+3. validate OpenClaw config
+4. restart gateway
+
+See:
+
+- [`docs/run-guide.md`](/mnt/20t/xubuqiang/EcoClaw/EcoClaw/docs/run-guide.md)
+
+## Build
 
 ```bash
-openclaw config set plugins.allow "[\"ecoclaw\"]"
-openclaw config set plugins.entries.ecoclaw.enabled true
-openclaw gateway restart
+cd /mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin
+corepack pnpm build
+corepack pnpm typecheck
 ```
 
-## 2) Development-Mode Install
+## Runtime Model Prefix
 
-If you are iterating on plugin source directly, use a load-path install instead:
-
-```bash
-openclaw config set plugins.load.paths "[\"/abs/path/to/EcoClaw/packages/openclaw-plugin\"]"
-openclaw config set plugins.allow "[\"ecoclaw\"]"
-openclaw config set plugins.entries.ecoclaw.enabled true
-openclaw gateway restart
-```
-
-Do not keep release install and dev load-path active at the same time. They use
-the same plugin id (`ecoclaw`) and OpenClaw will report duplicate plugin
-sources.
-
-## 3) Supported Plugin Config
-
-```bash
-openclaw config set plugins.entries.ecoclaw.config.stateDir "$HOME/.openclaw/ecoclaw-plugin-state"
-openclaw config set plugins.entries.ecoclaw.config.proxyAutostart true
-openclaw config set plugins.entries.ecoclaw.config.proxyPort 17667
-openclaw gateway restart
-```
-
-Optional debug:
-
-```bash
-openclaw config set plugins.entries.ecoclaw.config.logLevel debug
-openclaw config set plugins.entries.ecoclaw.config.debugTapProviderTraffic true
-openclaw config set plugins.entries.ecoclaw.config.debugTapPath "$HOME/.openclaw/ecoclaw-plugin-state/ecoclaw/provider-traffic.jsonl"
-openclaw gateway restart
-```
-
-Optional semantic reduction:
-
-```bash
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.enabled true
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.pythonBin "python"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.llmlinguaModelPath "/abs/path/to/llmlingua-2-bert-base-multilingual-cased-meetingbank"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.provider "local"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.modelPath "/abs/path/to/all-MiniLM-L6-v2"
-openclaw gateway restart
-```
-
-Summary generation knobs:
-
-```bash
-openclaw config set plugins.entries.ecoclaw.config.summary.summaryGenerationMode "heuristic"
-openclaw config set plugins.entries.ecoclaw.config.summary.summaryMaxOutputTokens 1200
-openclaw gateway restart
-```
-
-If you prefer remote embeddings instead of a local embedding model:
-
-```bash
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.provider "api"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.apiBaseUrl "https://your-openai-compatible-base/v1"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.apiKey "<secret>"
-openclaw config set plugins.entries.ecoclaw.config.semanticReduction.embedding.apiModel "text-embedding-3-small"
-openclaw gateway restart
-```
-
-Valid config keys are only:
-
-- `enabled`
-- `logLevel`
-- `proxyBaseUrl`
-- `proxyApiKey`
-- `stateDir`
-- `debugTapProviderTraffic`
-- `debugTapPath`
-- `proxyAutostart`
-- `proxyPort`
-- `semanticReduction`
-- `summary`
-
-## 4) Model Selection
-
-In OpenClaw, use explicit EcoClaw provider models:
+When the plugin is active, it registers an explicit provider namespace:
 
 ```text
-ecoclaw/gpt-5.4
+ecoclaw/<model>
 ```
 
-The plugin auto-starts an embedded proxy and syncs explicit model aliases into
-`~/.openclaw/openclaw.json` when possible.
-
-## 5) How Cache Reuse Works
-
-For the default Responses path, EcoClaw does not rely on `previous_response_id`
-to force cross-task reuse. The stable hit comes from keeping the cacheable
-prefix byte-identical across requests:
-
-- Normalize dynamic timestamp prefixes like `[Fri 2026-03-27 14:08 GMT+8]` to `[<TS>]`, then append the real timestamp back at the tail as metadata
-- Compute one stable `prompt_cache_key` from normalized model + instructions + developer prompt + tool fingerprint
-- Force `prompt_cache_retention = "24h"` on outbound `/responses` calls
-
-Once one request warms that normalized prefix, later same-session turns and
-forked first turns land in the same upstream cache partition and can reuse it.
-
-## 6) Commands
-
-Use slash commands in TUI:
+Example:
 
 ```text
-/ecoclaw help              # show command usage and examples
-/ecoclaw status            # current binding (sessionKey/task/logical/seq)
-/ecoclaw cache list        # list known task-cache workspaces
-/ecoclaw cache new <id>    # create/switch current task-cache
-/ecoclaw cache delete <id> # delete task-cache and purge local state
-/ecoclaw session new       # create next logical session in current task-cache
+ecoclaw/gpt-5.4-mini
 ```
 
-You can also type inline form (`ecoclaw status`), but slash form is preferred.
-
-## 7) Runtime Files
+## Runtime State
 
 Default state directory:
 
@@ -166,172 +72,43 @@ Default state directory:
 $HOME/.openclaw/ecoclaw-plugin-state/ecoclaw/
 ```
 
-Important files:
+Useful files:
 
-- `event-trace.jsonl`: per-turn pipeline events
-- `provider-traffic.jsonl`: provider tap debug log (if enabled)
-- `response-root-state.json`: root-link metadata cache
-- `sessions/<logical>/turns.jsonl`: logical session turn history
+- `event-trace.jsonl`
+- `provider-traffic.jsonl`
+- `response-root-state.json`
+- `sessions/<logical>/turns.jsonl`
 
-## 8) Runtime Inspection
+## Debugging
 
-When you test EcoClaw inside real OpenClaw, the fastest way to understand what
-it decided is to inspect `event-trace.jsonl`.
-
-Key places to look:
-
-- `finalContext.metadata.policy`: full online policy snapshot for that turn
-- `finalContext.metadata.policy.roi`: explicit ROI estimates for summary, handoff, and reduction
-- `finalContext.metadata.policy.decisions`: which execution paths were requested
-- `finalContext.metadata.reduction.beforeCallSummary`: pre-call reduction summary
-- `finalContext.metadata.reduction.afterCallSummary`: post-call reduction summary
-- `finalContext.metadata.summary`: latest summary generation artifact
-
-Important ROI fields:
-
-- `estimatedSavedTokens`: expected tokens saved if this action is taken
-- `estimatedCostTokens`: expected extra tokens spent to execute the action
-- `netTokens`: `saved - cost`
-- `recommended`: current heuristic recommendation
-- `confidence`: `low | medium | high`
-- `notes`: short explanation for the estimate
-
-You can also watch provider-level payload behavior with:
+When a run looks invalid, start with:
 
 ```bash
-tail -f "$HOME/.openclaw/ecoclaw-plugin-state/ecoclaw/provider-traffic.jsonl"
+OPENCLAW_CONFIG_PATH=$HOME/.openclaw/openclaw.json openclaw config validate
+tail -n 100 $HOME/.openclaw/logs/gateway.log
+rg 'stable_prefix_rewrite|proxy_before_call_rewrite|proxy_after_call_rewrite|tool_result_persist_applied' \
+  $HOME/.openclaw/ecoclaw-plugin-state/task-state/trace.jsonl
 ```
 
-This is useful when you want to confirm:
+The runtime sanity guide lives in:
 
-- stabilized prefixes are actually leaving through the proxy
-- `prompt_cache_retention="24h"` is present on outbound Responses calls
-- upstream usage fields are present or missing on a specific turn
+- [`docs/run-guide.md`](/mnt/20t/xubuqiang/EcoClaw/EcoClaw/docs/run-guide.md)
 
-## 9) Acceptance Test
+## Package Scripts
 
-Unified entry:
+Primary package scripts:
 
 ```bash
-cd packages/openclaw-plugin
-npm run acceptance:e2e
+corepack pnpm build
+corepack pnpm typecheck
+node --import tsx --test src/**/*.test.ts
 ```
 
-Mode variants:
+The package still contains acceptance and release helper scripts under
+`packages/openclaw-plugin/scripts/`. They are kept for development support, but
+they are not the main benchmark entrypoint and should not be treated as the
+project-wide experimental harness.
 
-```bash
-bash ./scripts/e2e.sh cache
-bash ./scripts/e2e.sh cache-multi
-bash ./scripts/e2e.sh cache-fork
-bash ./scripts/e2e.sh semantic
-bash ./scripts/e2e.sh summary
-bash ./scripts/e2e.sh report
-```
+Script inventory:
 
-The unified entry is intentionally dispatcher-style, so later we can add more modes
-without changing the main workflow: each new E2E scenario only needs a new mode
-mapping or a new underlying script.
-
-Build a unified acceptance report from the latest artifacts:
-
-```bash
-cd packages/openclaw-plugin
-npm run acceptance:report
-```
-
-This writes:
-
-- `packages/openclaw-plugin/.tmp/acceptance-report/report.json`
-- `packages/openclaw-plugin/.tmp/acceptance-report/report.md`
-
-Run the built-in cache acceptance harness:
-
-```bash
-cd packages/openclaw-plugin
-npm run acceptance:cache
-```
-
-Useful variants:
-
-```bash
-TARGET_CLEAN_RUNS=1 bash ./scripts/cache_acceptance.sh multi
-TARGET_CLEAN_RUNS=1 bash ./scripts/cache_acceptance.sh fork
-```
-
-The harness:
-
-- seeds a minimal Responses session scaffold
-- verifies same-session bridge -> task1 -> task2 -> task3 cache reuse
-- verifies bridge -> fork_A / fork_B / fork_C first-turn reuse
-- retries noisy runs and requires cache-read thresholds before reporting success
-
-Outputs are written under `packages/openclaw-plugin/.tmp/cache-acceptance/`.
-
-Run the semantic reduction end-to-end harness:
-
-```bash
-cd packages/openclaw-plugin
-npm run acceptance:semantic
-```
-
-Useful overrides:
-
-```bash
-SEMANTIC_PYTHON_BIN="/abs/path/to/python" \
-SEMANTIC_LLM_MODEL_PATH="/abs/path/to/llmlingua-2-bert-base-multilingual-cased-meetingbank" \
-EMBEDDING_PROVIDER=local \
-EMBEDDING_MODEL_PATH="/abs/path/to/all-MiniLM-L6-v2" \
-bash ./scripts/semantic_e2e.sh
-```
-
-For API embeddings:
-
-```bash
-EMBEDDING_PROVIDER=api \
-EMBEDDING_API_BASE_URL="https://your-openai-compatible-base/v1" \
-EMBEDDING_API_KEY="<secret>" \
-EMBEDDING_API_MODEL="text-embedding-3-small" \
-bash ./scripts/semantic_e2e.sh
-```
-
-The semantic harness:
-
-- rebuilds the plugin dist bundle
-- writes a temporary `semanticReduction` plugin config
-- restarts OpenClaw gateway
-- sends a real agent turn through the plugin path
-- reads the new EcoClaw trace entry and verifies `policy -> reduction -> semantic_llmlingua2`
-- restores the original OpenClaw config unless `KEEP_CONFIG=1`
-
-Run the summary end-to-end harness:
-
-```bash
-cd packages/openclaw-plugin
-npm run acceptance:summary
-```
-
-Useful overrides:
-
-```bash
-SUMMARY_GENERATION_MODE=heuristic \
-SUMMARY_TRIGGER_STABLE_CHARS=1 \
-bash ./scripts/summary_e2e.sh
-```
-
-The summary harness:
-
-- rebuilds the plugin dist bundle
-- writes a temporary `summary` plugin config
-- restarts OpenClaw gateway
-- sends one real agent turn through the plugin path
-- verifies `policy.summary.requested -> summary.generated -> context.state.updated`
-- restores the original OpenClaw config unless `KEEP_CONFIG=1`
-
-## 10) Dashboard
-
-```bash
-cd apps/lab-bench
-corepack pnpm --filter @ecoclaw/lab-bench dev
-```
-
-Open `http://127.0.0.1:7777` to inspect runtime decisions and summary/reduction ROI.
+- [`docs/architecture/plugin-script-inventory.md`](/mnt/20t/xubuqiang/EcoClaw/EcoClaw/docs/architecture/plugin-script-inventory.md)

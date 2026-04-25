@@ -1,12 +1,12 @@
 {
   "name": "ecoclaw",
   "version": "0.1.0",
-  "description": "EcoClaw plugin for OpenClaw: routing hooks and token-efficiency runtime controls.",
+  "description": "TokenPilot plugin for OpenClaw: routing hooks and token-efficiency runtime controls.",
   "main": "dist/index.js",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Xubqpanda/EcoClaw.git",
+    "url": "https://github.com/Xubqpanda/TokenPilot.git",
     "directory": "packages/openclaw-plugin"
   },
   "files": [
@@ -52,6 +52,7 @@
     "openclaw",
     "openclaw-plugin",
     "ecoclaw",
+    "tokenpilot",
     "llm-routing",
     "token-efficiency"
   ]
