@@ -104,10 +104,9 @@ corepack pnpm typecheck
 node --import tsx --test src/**/*.test.ts
 ```
 
-The package still contains acceptance and release helper scripts under
-`packages/openclaw-plugin/scripts/`. They are kept for development support, but
-they are not the main benchmark entrypoint and should not be treated as the
-project-wide experimental harness.
+The package still contains a small release-helper surface under
+`packages/openclaw-plugin/scripts/`. Benchmarking and evaluation flows should
+live outside this package.
 
 Script inventory:
 
