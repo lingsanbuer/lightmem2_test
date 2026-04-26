@@ -10,10 +10,17 @@ The current codebase is already in a workable state after the large `index.ts`
 split. The next step is to align mental model and naming before any second
 round of directory reorganization.
 
-## Group 1: Request-Time Transforms
+## Context Management Stack
 
-These modules mutate or filter payloads close to request/response boundaries.
-They are local transforms, not long-term history management.
+The plugin runtime is better understood as a three-part context management
+stack, plus one integration layer.
+
+### 1. Request Preprocessing
+
+These modules act before content becomes durable context/history.
+
+They mutate or filter payloads close to request/response boundaries and improve
+prompt locality before the long-term context stack is touched.
 
 Files:
 
@@ -31,11 +38,12 @@ Typical responsibility:
 - request-time reduction
 - response-time reduction
 - tool-result ingress shaping
+- pre-context payload hygiene
 
-## Group 2: History Lifecycle
+### 2. Page Out
 
 These modules define how transcript-derived state is assembled, persisted,
-rewritten, and evicted across a long-running session timeline.
+rewritten, and eventually paged out of the active context timeline.
 
 Files:
 
@@ -53,11 +61,16 @@ Typical responsibility:
 - transcript-to-history sync
 - session and turn binding
 - task-aware eviction
+- stub/reference creation for cold history
 
-## Group 3: Recovery
+### 3. Page In
 
-These modules implement the recovery protocol around archived content and
-explicit recovery tool behavior.
+These modules implement how paged-out content is reintroduced when it becomes
+useful again.
+
+Today this mainly means archive lookup + recovery-tool rehydration. In the
+future this bucket can also absorb semantic retrieval / selective memory
+reinjection paths.
 
 Files:
 
@@ -71,11 +84,12 @@ Typical responsibility:
 - recovery markers
 - archive reference resolution
 - memory fault recovery tool behavior
+- future selective recall / semantic retrieve paths
 
-## Group 4: Runtime Glue
+## Integration Layer
 
-These modules wire the runtime together. They should stay thin and should not
-grow new domain logic without a strong reason.
+These modules wire the runtime together. They are not a first-class context
+management strategy and should stay thin.
 
 Files:
 
@@ -94,6 +108,7 @@ Typical responsibility:
 - hook registration
 - provider wiring
 - gateway/runtime orchestration
+- context stack bootstrap
 
 ## Cleanup Guidance
 

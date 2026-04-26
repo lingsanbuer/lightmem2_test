@@ -26,6 +26,35 @@ Two different mechanisms:
 - **Recovery**: Should NOT go through reduction again, but can be evicted with whole task
 - **Eviction/Reduction**: Task-level eviction replaces whole task blocks with stubs
 
+## Context Management Stack
+
+The current method direction is best understood as:
+
+1. **Request Preprocessing**
+   - stable-prefix shaping
+   - request/response reduction
+   - tool-result ingress shaping
+2. **Page Out**
+   - transcript -> canonical history sync
+   - task-aware eviction
+   - stub/reference generation for cold context
+3. **Page In**
+   - archive lookup
+   - recovery-tool rehydration
+   - future semantic retrieve / selective recall
+
+These three layers form the context management stack.
+
+Separately, there is an **integration layer**:
+
+- config normalization
+- runtime hook registration
+- provider wiring
+- context-engine bootstrap
+
+That integration layer should stay thin and should not absorb new history
+management logic by default.
+
 ## eviction semantics
 
 - eviction modifies `canonical.messages` but must NOT remove IDs from `seenMessageIds` ledger

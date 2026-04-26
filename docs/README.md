@@ -12,8 +12,10 @@ directory in this repo.
 - [Overview](architecture/overview.md) - 3-layer architecture, key distinctions
 - [Canonical Design](architecture/canonical-design.md) - Transcript/canonical/eviction design
 - [Plugin Semantic Grouping](architecture/plugin-semantic-grouping.md) - Current semantic buckets for plugin modules
+- [Plugin Semantic Regroup Plan](architecture/plugin-semantic-regroup-plan.md) - Future semantic facades and regroup strategy
 - [Plugin Script Inventory](architecture/plugin-script-inventory.md) - Status of plugin-side helper scripts
 - [Runtime ID Inventory](architecture/ecoclaw-runtime-id-inventory.md) - Current `ecoclaw` naming surface and migration risk classes
+- [Experiments Consolidation Plan](architecture/experiments-consolidation-plan.md) - How benchmark assets should merge into `experiments/`
 
 ## Plans
 
