@@ -1,7 +1,8 @@
 # Plugin Semantic Regroup Plan
 
 This document defines the next structural cleanup target for the plugin
-runtime. It is a **design plan**, not an immediate file-move checklist.
+runtime. It started as a design plan; it now also records what has already
+landed.
 
 The current plugin is already operationally cleaner than before:
 
@@ -10,7 +11,7 @@ The current plugin is already operationally cleaner than before:
 - legacy acceptance harness is removed
 - obvious dead config surface is gone
 
-The next question is not "how to split more files", but:
+The original regrouping question was not "how to split more files", but:
 
 - which semantic boundaries should become first-class
 - which current directories already match those boundaries
@@ -115,7 +116,28 @@ Current files:
 - `src/proxy/upstream.ts`
 - `src/index.ts`
 
-## Target Regroup Shape
+## Landed Regroup Shape
+
+The facade-first step is complete:
+
+```text
+src/
+  context-stack/
+    request-preprocessing.ts
+    page-out.ts
+    page-in.ts
+    integration.ts
+    index.ts
+```
+
+The physical regroup also landed for most live modules:
+
+- `request-preprocessing/*`
+- `page-out/*`
+- `page-in/*`
+- most of `integration/*`
+
+## Historical Options
 
 The desired end state is not necessarily a total directory move. The desired end
 state is a clearer semantic entry surface.
@@ -123,6 +145,8 @@ state is a clearer semantic entry surface.
 ### Option A: Facade-First Regroup
 
 Add semantic entrypoints without moving the underlying files yet.
+
+Status: **completed**
 
 Current target shape:
 
@@ -153,6 +177,8 @@ Drawbacks:
 
 Move only the most semantically obvious outliers.
 
+Status: **completed for the active mainline**
+
 Likely first candidates:
 
 - `src/context-stack/request-preprocessing/tool-results-persist.ts`
@@ -169,14 +195,8 @@ Drawbacks:
 
 ### Recommendation
 
-Use **Option A first**.
-
-The next useful step is:
-
-1. define semantic facades
-2. keep underlying files where they are
-3. validate benchmark behavior
-4. only then decide whether any physical regroup is worth it
+That sequence was correct. The remaining work is no longer "start regrouping";
+it is "finish the tail cleanup after regrouping".
 
 ## What Should Not Be Mixed
 
@@ -204,9 +224,9 @@ reduction files.
 `index.ts`, provider wiring, and hook registration should stay thin. New
 history/reduction/recovery logic should not grow back into runtime glue files.
 
-## Validation Expectations Before Physical Moves
+## Validation That Was Used
 
-Before any physical regroup beyond facades, rerun at least:
+Before each physical regroup batch, rerun at least:
 
 1. plugin typecheck
 2. plugin build
@@ -214,5 +234,13 @@ Before any physical regroup beyond facades, rerun at least:
 4. plugin continual smoke
 5. one benchmark path that exercises `new_session`
 
-Until that validation is cheap and stable again, semantic regroup should remain
-mostly design-level plus facade-level.
+This validation loop is what allowed the regroup to land incrementally.
+
+## Remaining Tail Work
+
+The regroup is mostly done. Remaining items are smaller:
+
+1. remove empty legacy directories under `src/`
+2. update architecture docs to point to the new semantic paths
+3. optionally move `src/proxy/upstream.ts` into `integration/`
+4. continue keeping `src/index.ts` as a composition root rather than a logic sink

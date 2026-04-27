@@ -65,7 +65,7 @@ management logic by default.
 - `packages/layers/decision/` - Policy decisions
 - `packages/openclaw-plugin/src/execution/` - Plugin-local execution helpers (reduction, passes, archive-recovery)
 - `packages/layers/history/` - Registry and raw semantic turn persistence
-- `packages/openclaw-plugin/` - Plugin implementation
+- `packages/openclaw-plugin/src/context-stack/` - Landed semantic runtime layout
 
 Related architecture notes:
 

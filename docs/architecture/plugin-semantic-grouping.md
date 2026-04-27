@@ -3,12 +3,14 @@
 ## Purpose
 
 This document records the semantic grouping of the current plugin runtime.
-It is a planning document for future cleanup and regrouping. It does not imply
-that files should be physically moved immediately.
+It reflects the **current landed structure**, not a speculative future layout.
 
-The current codebase is already in a workable state after the large `index.ts`
-split. The next step is to align mental model and naming before any second
-round of directory reorganization.
+The main regroup is now complete:
+
+- semantic facades exist under `src/context-stack/`
+- request preprocessing, page-out, page-in, and integration all have physical
+  modules under that tree
+- `index.ts` is now primarily a composition root
 
 ## Context Management Stack
 
@@ -24,13 +26,13 @@ prompt locality before the long-term context stack is touched.
 
 Files:
 
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/stable-prefix.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/before-call-reduction.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/after-call-reduction.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/reduction-context.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/reduction-helpers.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/tool-results/persist.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/root-prompt-stabilizer.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/stable-prefix.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/before-call-reduction.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/after-call-reduction.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/reduction-context.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/reduction-helpers.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/tool-results-persist.ts`
+- `packages/openclaw-plugin/src/context-stack/request-preprocessing/root-prompt-stabilizer.ts`
 
 Typical responsibility:
 
@@ -47,13 +49,13 @@ rewritten, and eventually paged out of the active context timeline.
 
 Files:
 
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/canonical/state.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/canonical/anchors.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/canonical/rewrite.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/canonical/eviction.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/transcript/sync.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/session/topology.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/session/turn-bindings.ts`
+- `packages/openclaw-plugin/src/context-stack/page-out/transcript-sync.ts`
+- `packages/openclaw-plugin/src/context-stack/page-out/canonical-state.ts`
+- `packages/openclaw-plugin/src/context-stack/page-out/canonical-anchors.ts`
+- `packages/openclaw-plugin/src/context-stack/page-out/canonical-rewrite.ts`
+- `packages/openclaw-plugin/src/context-stack/page-out/canonical-eviction.ts`
+- `packages/openclaw-plugin/src/session/topology.ts`
+- `packages/openclaw-plugin/src/session/turn-bindings.ts`
 
 Typical responsibility:
 
@@ -74,10 +76,10 @@ reinjection paths.
 
 Files:
 
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/recovery/common.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/recovery/protocol.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/recovery/tool.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/execution/archive-recovery/index.ts`
+- `packages/openclaw-plugin/src/context-stack/page-in/recovery-common.ts`
+- `packages/openclaw-plugin/src/context-stack/page-in/recovery-protocol.ts`
+- `packages/openclaw-plugin/src/context-stack/page-in/recovery-tool.ts`
+- `packages/openclaw-plugin/src/execution/archive-recovery/index.ts`
 
 Typical responsibility:
 
@@ -93,14 +95,15 @@ management strategy and should stay thin.
 
 Files:
 
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/config.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/context-engine.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/runtime/helpers.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/runtime/register.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/runtime.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/provider.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/proxy/upstream.ts`
-- `/mnt/20t/xubuqiang/EcoClaw/EcoClaw/packages/openclaw-plugin/src/index.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/config.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/context-engine.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/runtime-helpers.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/runtime-register.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/proxy-runtime.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/proxy-provider.ts`
+- `packages/openclaw-plugin/src/context-stack/integration/trace-hooks.ts`
+- `packages/openclaw-plugin/src/proxy/upstream.ts`
+- `packages/openclaw-plugin/src/index.ts`
 
 Typical responsibility:
 
@@ -110,16 +113,16 @@ Typical responsibility:
 - gateway/runtime orchestration
 - context stack bootstrap
 
-## Cleanup Guidance
+## Current Status
 
-The next cleanup pass should prefer:
+The regroup goal is now mostly achieved:
 
-1. deleting stale docs and scripts
-2. rewriting outdated entrypoint documentation
-3. keeping physical file moves minimal until naming and boundaries are stable
+- old `canonical/`, `recovery/`, `runtime/`, and most `proxy/` file locations are gone
+- semantic file ownership is visible in the directory tree
+- remaining old-location outlier is primarily `src/proxy/upstream.ts`
 
-Do not start a second large directory reorganization until:
+The next cleanup passes should be smaller:
 
-- `TokenPilot` branding is settled
-- runtime identifiers that must remain compatible are explicitly listed
-- benchmark integration is stable again after the current continual fixes
+1. remove empty legacy directories
+2. keep `src/index.ts` thin
+3. decide whether `src/proxy/upstream.ts` should also move under `integration/`
