@@ -10,12 +10,18 @@ export XDG_CONFIG_HOME="${HOME}/.config"
 mkdir -p "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}"
 CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"
 DEV_PLUGIN_PATH="${PLUGIN_DIR}"
+INSTALLED_PLUGIN_PATH="${HOME}/.openclaw/extensions/ecoclaw"
 
-if [[ -f "${CONFIG_PATH}" ]] && command -v jq >/dev/null 2>&1; then
+sanitize_plugin_config() {
+  if [[ ! -f "${CONFIG_PATH}" ]]; then
+    return 0
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
   tmp_file="$(mktemp)"
-  jq --arg dev_path "${DEV_PLUGIN_PATH}" '
+    jq --arg dev_path "${DEV_PLUGIN_PATH}" --arg installed_path "${INSTALLED_PLUGIN_PATH}" '
     if .plugins.load.paths? then
-      (.plugins.load.paths |= map(select(. != $dev_path))) |
+      (.plugins.load.paths |= map(select(. != $dev_path and . != $installed_path))) |
       if ((.plugins.load.paths // []) | length) == 0 then
         del(.plugins.load)
       else
@@ -31,9 +37,8 @@ if [[ -f "${CONFIG_PATH}" ]] && command -v jq >/dev/null 2>&1; then
   else
     rm -f "${tmp_file}"
   fi
-fi
+  fi
 
-if [[ -f "${CONFIG_PATH}" ]]; then
   python3 - "${CONFIG_PATH}" <<'PY'
 import json
 import os
@@ -102,13 +107,17 @@ with open(config_path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
     f.write("\n")
 PY
-fi
+}
+
+sanitize_plugin_config
 
 archive_path="$("${SCRIPT_DIR}/pack_release.sh")"
 
 if openclaw plugins info ecoclaw >/dev/null 2>&1; then
   printf 'y\n' | openclaw plugins uninstall ecoclaw >/dev/null 2>&1 || true
 fi
+
+sanitize_plugin_config
 
 openclaw plugins install "${archive_path}"
 openclaw gateway restart
