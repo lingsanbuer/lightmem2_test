@@ -830,7 +830,15 @@ PY
   fi
   if ! openclaw gateway health >/dev/null 2>&1; then
     echo "OpenClaw gateway is unreachable; starting a local gateway..."
-    nohup openclaw gateway --force >/tmp/openclaw_gateway.log 2>&1 &
+    rm -f /tmp/openclaw_gateway.log
+    nohup env \
+      HOME="${HOME}" \
+      XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
+      XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" \
+      ECOCLAW_UPSTREAM_HTTP_PROXY="${ECOCLAW_UPSTREAM_HTTP_PROXY:-}" \
+      ECOCLAW_UPSTREAM_HTTPS_PROXY="${ECOCLAW_UPSTREAM_HTTPS_PROXY:-}" \
+      ECOCLAW_UPSTREAM_NO_PROXY="${ECOCLAW_UPSTREAM_NO_PROXY:-}" \
+      openclaw gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
     local gateway_pid=$!
     local attempts=0
     while [[ ${attempts} -lt 20 ]]; do
