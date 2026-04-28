@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
+from lib_fws import fws_available, is_fws_task, start_fws, stop_fws
 from lib_tasks import Task
 
 
@@ -56,8 +57,46 @@ OPENCLAW_CONFIG_PATH = Path(
     os.environ.get("OPENCLAW_CONFIG_PATH", str(Path.home() / ".openclaw" / "openclaw.json"))
 )
 OPENCLAW_AGENT_CONFIG_SETTLE_S = float(
-    os.environ.get("PINCHBENCH_OPENCLAW_AGENT_CONFIG_SETTLE_S", "4.0")
+    os.environ.get("PINCHBENCH_OPENCLAW_AGENT_CONFIG_SETTLE_S", "15.0")
 )
+OPENCLAW_GATEWAY_STABLE_PROBES = int(
+    os.environ.get("PINCHBENCH_OPENCLAW_GATEWAY_STABLE_PROBES", "3")
+)
+OPENCLAW_GATEWAY_STABLE_POLL_S = float(
+    os.environ.get("PINCHBENCH_OPENCLAW_GATEWAY_STABLE_POLL_S", "1.0")
+)
+OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S = float(
+    os.environ.get("PINCHBENCH_OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S", "12.0")
+)
+
+
+def _wait_for_gateway_stability() -> bool:
+    required = max(1, OPENCLAW_GATEWAY_STABLE_PROBES)
+    poll_s = max(0.1, OPENCLAW_GATEWAY_STABLE_POLL_S)
+    max_wait_s = max(0.0, OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S)
+    if required <= 0 or max_wait_s <= 0:
+        return True
+    stable = 0
+    deadline = time.monotonic() + max_wait_s
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["openclaw", "gateway", "health"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                stable += 1
+                if stable >= required:
+                    return True
+            else:
+                stable = 0
+        except Exception:
+            stable = 0
+        time.sleep(poll_s)
+    return False
 
 
 @contextmanager
@@ -299,6 +338,17 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
                 OPENCLAW_AGENT_CONFIG_SETTLE_S,
             )
             time.sleep(OPENCLAW_AGENT_CONFIG_SETTLE_S)
+        if OPENCLAW_GATEWAY_STABLE_PROBES > 0 and OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S > 0:
+            logger.info(
+                "Best-effort gateway health probe: need %s stable checks within %.1fs after agent config rewrite",
+                OPENCLAW_GATEWAY_STABLE_PROBES,
+                OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S,
+            )
+            if not _wait_for_gateway_stability():
+                logger.warning(
+                    "Gateway health probe did not stabilize within %.1fs; continuing anyway",
+                    OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S,
+                )
         return True
 
 
@@ -571,8 +621,17 @@ def _load_transcript(
         "PINCHBENCH_TRANSCRIPT_RETRY_SLEEP_CONTINUOUS" if continuous_mode else "PINCHBENCH_TRANSCRIPT_RETRY_SLEEP",
         "5.0" if continuous_mode else "1.0",
     ))
+    lock_drain_wait_seconds = float(
+        os.environ.get(
+            "PINCHBENCH_TRANSCRIPT_LOCK_DRAIN_WAIT_SECONDS_CONTINUOUS" if continuous_mode else "PINCHBENCH_TRANSCRIPT_LOCK_DRAIN_WAIT_SECONDS",
+            "120" if continuous_mode else "45",
+        )
+    )
+    deadline = time.time() + max_attempts * retry_sleep_s
+    lock_deadline = deadline
 
-    for attempt in range(max_attempts):
+    attempt = 0
+    while True:
         # 1. Prefer the concrete transcript path from sessions.json when available.
         resolved_session_file = _resolve_session_file_from_store(agent_id)
         if resolved_session_file and resolved_session_file.exists():
@@ -626,17 +685,31 @@ def _load_transcript(
         pending_locks = _pending_transcript_lock_paths(agent_dir, session_id, agent_id)
         if pending_locks:
             last_pending_locks = pending_locks
-            if attempt in (0, 2, 5) or attempt == max_attempts - 1:
+            oldest_lock_age = 0.0
+            for lock_path in pending_locks:
+                try:
+                    oldest_lock_age = max(oldest_lock_age, time.time() - lock_path.stat().st_mtime)
+                except OSError:
+                    continue
+            lock_deadline = max(lock_deadline, time.time() + lock_drain_wait_seconds)
+            if attempt in (0, 2, 5) or time.time() >= deadline:
                 logger.info(
-                    "Transcript not ready yet for agent %s; pending lock files: %s (attempt %s/%s)",
+                    "Transcript not ready yet for agent %s; pending lock files: %s (attempt %s, oldest_lock_age=%.1fs, drain_deadline=%.1fs)",
                     agent_id,
                     [path.name for path in pending_locks],
                     attempt + 1,
-                    max_attempts,
+                    oldest_lock_age,
+                    max(0.0, lock_deadline - time.time()),
                 )
+        else:
+            lock_deadline = deadline
 
-        if attempt < max_attempts - 1:
-            time.sleep(retry_sleep_s)
+        attempt += 1
+        now = time.time()
+        if now >= deadline and (not last_pending_locks or now >= lock_deadline):
+            break
+
+        time.sleep(retry_sleep_s)
 
     if transcript_path is None:
         sessions_dir = agent_dir / "sessions"
@@ -951,6 +1024,7 @@ def execute_openclaw_task(
     cleanup_sessions: bool = True,
     defer_transcript_load: bool = False,
     initial_session_id: str | None = None,
+    manage_fws: bool = True,
 ) -> Dict[str, Any]:
     logger.info("🤖 Agent [%s] starting task: %s", agent_id, task.task_id)
     logger.info("   Task: %s", task.name)
@@ -967,211 +1041,215 @@ def execute_openclaw_task(
     if cleanup_sessions:
         cleanup_agent_sessions(agent_id)
 
-    start_time = time.time()
-    workspace = prepare_task_workspace(
-        skill_dir=skill_dir,
-        run_id=run_id,
-        task=task,
-        agent_id=agent_id,
-        workspace_override=agent_workspace,
-    )
-    session_id = initial_session_id or f"{task.task_id}_{int(time.time() * 1000)}"
-    timeout_seconds = task.timeout_seconds * timeout_multiplier
-    stdout = ""
-    stderr = ""
-    exit_code = -1
-    timed_out = False
-
-    session_plan = _build_task_session_plan(task)
-
-    def _run_once(
-        current_session_id: str,
-        current_timeout_seconds: float,
-        current_prompt: str,
-    ) -> tuple[str, str, int, bool]:
-        run_stdout = ""
-        run_stderr = ""
-        run_exit_code = -1
-        run_timed_out = False
-        try:
-            command = [
-                "openclaw",
-                "agent",
-                "--agent",
-                agent_id,
-                "--session-id",
-                current_session_id,
-                "--message",
-                current_prompt,
-            ]
-            if OPENCLAW_AGENT_LOCAL:
-                command.append("--local")
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                cwd=str(workspace),
-                timeout=current_timeout_seconds,
-                check=False,
+    fws_env: Dict[str, Optional[str]] | None = None
+    if manage_fws and is_fws_task(task.frontmatter):
+        if not fws_available():
+            logger.warning(
+                "Task %s requires fws-backed services, but fws is not available.",
+                task.task_id,
             )
-            run_stdout = result.stdout
-            run_stderr = result.stderr
-            run_exit_code = result.returncode
-        except subprocess.TimeoutExpired as exc:
-            run_timed_out = True
-            run_stdout = _ensure_text(exc.stdout)
-            run_stderr = _ensure_text(exc.stderr)
-        except FileNotFoundError as exc:
-            run_stderr = f"openclaw command not found: {exc}"
-        return run_stdout, run_stderr, run_exit_code, run_timed_out
+        else:
+            fws_env = start_fws()
 
-    executed_session_ids: List[str] = []
-    current_session_id = session_id
-    for index, session_spec in enumerate(session_plan):
-        prompt_text = str(session_spec.get("prompt") or task.prompt).strip() or task.prompt
-        if index == 0 and not initial_session_id:
-            current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
-        elif session_spec.get("new_session"):
-            current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
-        if current_session_id not in executed_session_ids:
-            executed_session_ids.append(current_session_id)
-        run_stdout, run_stderr, run_exit_code, run_timed_out = _run_once(
-            current_session_id,
-            timeout_seconds,
-            prompt_text,
+    try:
+        start_time = time.time()
+        workspace = prepare_task_workspace(
+            skill_dir=skill_dir,
+            run_id=run_id,
+            task=task,
+            agent_id=agent_id,
+            workspace_override=agent_workspace,
         )
-        stdout = f"{stdout}\n{run_stdout}".strip() if stdout else run_stdout
-        stderr = f"{stderr}\n{run_stderr}".strip() if stderr else run_stderr
-        exit_code = run_exit_code
-        timed_out = run_timed_out
-        if timed_out or (exit_code not in (0, -1) and "openclaw command not found" not in str(stderr)):
-            break
+        session_id = initial_session_id or f"{task.task_id}_{int(time.time() * 1000)}"
+        timeout_seconds = task.timeout_seconds * timeout_multiplier
+        stdout = ""
+        stderr = ""
+        exit_code = -1
+        timed_out = False
+        use_local = OPENCLAW_AGENT_LOCAL or (fws_env is not None)
 
-    if defer_transcript_load:
-        transcript = []
-    else:
-        transcript = _load_transcripts_for_session_ids(agent_id, executed_session_ids, start_time)
+        session_plan = _build_task_session_plan(task)
 
-    # Parallel runs occasionally race with transcript persistence. Retry once
-    # to reduce false negatives when execution succeeded but transcript is empty.
-    if (
-        not defer_transcript_load
-        and not transcript
-        and not timed_out
-        and exit_code in (0, -1)
-        and "openclaw command not found" not in str(stderr)
-    ):
-        logger.warning(
-            "Empty transcript for %s; retrying task execution once (session sync fallback).",
-            task.task_id,
-        )
-        if cleanup_sessions:
-            cleanup_agent_sessions(agent_id)
-        retry_session_id = f"{session_id}_retry"
-        retry_started_at = time.time()
-        retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
-            retry_session_id, timeout_seconds, task.prompt
-        )
-        stdout = f"{stdout}\n{retry_stdout}".strip() if stdout else retry_stdout
-        stderr = f"{stderr}\n{retry_stderr}".strip() if stderr else retry_stderr
-        exit_code = retry_exit_code
-        timed_out = retry_timed_out
-        transcript = _load_transcript(agent_id, retry_session_id, retry_started_at)
+        def _run_once(
+            current_session_id: str,
+            current_timeout_seconds: float,
+            current_prompt: str,
+        ) -> tuple[str, str, int, bool]:
+            run_stdout = ""
+            run_stderr = ""
+            run_exit_code = -1
+            run_timed_out = False
+            try:
+                command = [
+                    "openclaw",
+                    "agent",
+                    "--agent",
+                    agent_id,
+                    "--session-id",
+                    current_session_id,
+                    "--message",
+                    current_prompt,
+                ]
+                if use_local:
+                    command.append("--local")
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(workspace),
+                    check=False,
+                )
+                run_stdout = result.stdout
+                run_stderr = result.stderr
+                run_exit_code = result.returncode
+            except FileNotFoundError as exc:
+                run_stderr = f"openclaw command not found: {exc}"
+            return run_stdout, run_stderr, run_exit_code, run_timed_out
 
-    should_retry_error, retry_reason = _is_transient_provider_error(transcript)
-    if (
-        not defer_transcript_load
-        and should_retry_error
-        and not timed_out
-        and exit_code in (0, -1)
-        and "openclaw command not found" not in str(stderr)
-    ):
-        logger.warning(
-            "Transient provider error for %s; retrying task execution once. reason=%s",
-            task.task_id,
-            retry_reason,
-        )
-        time.sleep(1.5)
-        if cleanup_sessions:
-            cleanup_agent_sessions(agent_id)
-        retry_session_id = f"{session_id}_provider_retry"
-        retry_started_at = time.time()
-        retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
-            retry_session_id, timeout_seconds, task.prompt
-        )
-        stdout = f"{stdout}\n{retry_stdout}".strip() if stdout else retry_stdout
-        stderr = f"{stderr}\n{retry_stderr}".strip() if stderr else retry_stderr
-        exit_code = retry_exit_code
-        timed_out = retry_timed_out
-        transcript = _load_transcript(agent_id, retry_session_id, retry_started_at)
+        executed_session_ids: List[str] = []
+        current_session_id = session_id
+        for index, session_spec in enumerate(session_plan):
+            prompt_text = str(session_spec.get("prompt") or task.prompt).strip() or task.prompt
+            if index == 0 and not initial_session_id:
+                current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
+            elif session_spec.get("new_session"):
+                current_session_id = f"{task.task_id}_s{index + 1}_{int(time.time() * 1000)}"
+            if current_session_id not in executed_session_ids:
+                executed_session_ids.append(current_session_id)
+            run_stdout, run_stderr, run_exit_code, run_timed_out = _run_once(
+                current_session_id,
+                timeout_seconds,
+                prompt_text,
+            )
+            stdout = f"{stdout}\n{run_stdout}".strip() if stdout else run_stdout
+            stderr = f"{stderr}\n{run_stderr}".strip() if stderr else run_stderr
+            exit_code = run_exit_code
+            timed_out = run_timed_out
+            if timed_out or (exit_code not in (0, -1) and "openclaw command not found" not in str(stderr)):
+                break
 
-    usage = _extract_usage_from_transcript(transcript)
-    llm_calls = _extract_llm_calls_from_transcript(transcript)
-    execution_time = time.time() - start_time
+        if defer_transcript_load:
+            transcript = []
+        else:
+            transcript = _load_transcripts_for_session_ids(agent_id, executed_session_ids, start_time)
 
-    status = "success"
-    if timed_out:
-        status = "timeout"
-    if not transcript:
-        status = "error"
-    if exit_code not in (0, -1) and not timed_out:
-        status = "error"
-    if stderr and "openclaw command not found" in str(stderr):
-        status = "error"
+        if (
+            not defer_transcript_load
+            and not transcript
+            and not timed_out
+            and exit_code in (0, -1)
+            and "openclaw command not found" not in str(stderr)
+        ):
+            logger.warning(
+                "Empty transcript for %s; retrying task execution once (session sync fallback).",
+                task.task_id,
+            )
+            if cleanup_sessions:
+                cleanup_agent_sessions(agent_id)
+            retry_session_id = f"{session_id}_retry"
+            retry_started_at = time.time()
+            retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
+                retry_session_id, timeout_seconds, task.prompt
+            )
+            stdout = f"{stdout}\n{retry_stdout}".strip() if stdout else retry_stdout
+            stderr = f"{stderr}\n{retry_stderr}".strip() if stderr else retry_stderr
+            exit_code = retry_exit_code
+            timed_out = retry_timed_out
+            transcript = _load_transcript(agent_id, retry_session_id, retry_started_at)
 
-    # Verbose logging for debugging
-    if verbose:
-        logger.info("   [VERBOSE] Exit code: %s", exit_code)
-        logger.info("   [VERBOSE] Execution time: %.2fs", execution_time)
-        logger.info("   [VERBOSE] Workspace: %s", workspace)
-        if stdout:
-            logger.info("   [VERBOSE] Stdout (first 1000 chars):\n%s", stdout[:1000])
-        if stderr:
-            logger.info("   [VERBOSE] Stderr:\n%s", stderr[:1000])
-        logger.info("   [VERBOSE] Transcript entries: %d", len(transcript))
+        should_retry_error, retry_reason = _is_transient_provider_error(transcript)
+        if (
+            not defer_transcript_load
+            and should_retry_error
+            and not timed_out
+            and exit_code in (0, -1)
+            and "openclaw command not found" not in str(stderr)
+        ):
+            logger.warning(
+                "Transient provider error for %s; retrying task execution once. reason=%s",
+                task.task_id,
+                retry_reason,
+            )
+            time.sleep(1.5)
+            if cleanup_sessions:
+                cleanup_agent_sessions(agent_id)
+            retry_session_id = f"{session_id}_provider_retry"
+            retry_started_at = time.time()
+            retry_stdout, retry_stderr, retry_exit_code, retry_timed_out = _run_once(
+                retry_session_id, timeout_seconds, task.prompt
+            )
+            stdout = f"{stdout}\n{retry_stdout}".strip() if stdout else retry_stdout
+            stderr = f"{stderr}\n{retry_stderr}".strip() if stderr else retry_stderr
+            exit_code = retry_exit_code
+            timed_out = retry_timed_out
+            transcript = _load_transcript(agent_id, retry_session_id, retry_started_at)
 
-        # Show agent responses from transcript
-        for entry in transcript:
-            if entry.get("type") == "message":
-                msg = entry.get("message", {})
-                role = msg.get("role", "unknown")
-                content = msg.get("content", "")
-                if role == "assistant":
-                    # Truncate long responses
-                    preview = content[:500] + "..." if len(content) > 500 else content
-                    logger.info("   [VERBOSE] Agent response: %s", preview)
-                elif role == "user":
-                    preview = content[:200] + "..." if len(content) > 200 else content
-                    logger.info("   [VERBOSE] User message: %s", preview)
+        usage = _extract_usage_from_transcript(transcript)
+        llm_calls = _extract_llm_calls_from_transcript(transcript)
+        execution_time = time.time() - start_time
 
-        # Show workspace files after task
-        if workspace.exists():
-            logger.info("   [VERBOSE] Workspace files after task:")
-            for f in sorted(workspace.rglob("*")):
-                if f.is_file():
-                    try:
-                        size = f.stat().st_size
-                        logger.info("      %s (%d bytes)", f.relative_to(workspace), size)
-                    except OSError:
-                        logger.info("      %s", f.relative_to(workspace))
+        status = "success"
+        if timed_out:
+            status = "timeout"
+        if not transcript:
+            status = "error"
+        if exit_code not in (0, -1) and not timed_out:
+            status = "error"
+        if stderr and "openclaw command not found" in str(stderr):
+            status = "error"
 
-    return {
-        "agent_id": agent_id,
-        "task_id": task.task_id,
-        "final_session_id": current_session_id,
-        "executed_session_ids": executed_session_ids,
-        "status": status,
-        "transcript": transcript,
-        "llm_calls": llm_calls,
-        "llm_models": sorted({str(call.get("model")) for call in llm_calls if call.get("model")}),
-        "usage": usage,
-        "workspace": str(workspace),
-        "exit_code": exit_code,
-        "timed_out": timed_out,
-        "execution_time": execution_time,
-        "stdout": stdout,
-        "stderr": stderr,
-    }
+        if verbose:
+            logger.info("   [VERBOSE] Exit code: %s", exit_code)
+            logger.info("   [VERBOSE] Execution time: %.2fs", execution_time)
+            logger.info("   [VERBOSE] Workspace: %s", workspace)
+            if stdout:
+                logger.info("   [VERBOSE] Stdout (first 1000 chars):\n%s", stdout[:1000])
+            if stderr:
+                logger.info("   [VERBOSE] Stderr:\n%s", stderr[:1000])
+            logger.info("   [VERBOSE] Transcript entries: %d", len(transcript))
+
+            for entry in transcript:
+                if entry.get("type") == "message":
+                    msg = entry.get("message", {})
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+                    if role == "assistant":
+                        preview = content[:500] + "..." if len(content) > 500 else content
+                        logger.info("   [VERBOSE] Agent response: %s", preview)
+                    elif role == "user":
+                        preview = content[:200] + "..." if len(content) > 200 else content
+                        logger.info("   [VERBOSE] User message: %s", preview)
+
+            if workspace.exists():
+                logger.info("   [VERBOSE] Workspace files after task:")
+                for f in sorted(workspace.rglob("*")):
+                    if f.is_file():
+                        try:
+                            size = f.stat().st_size
+                            logger.info("      %s (%d bytes)", f.relative_to(workspace), size)
+                        except OSError:
+                            logger.info("      %s", f.relative_to(workspace))
+
+        return {
+            "agent_id": agent_id,
+            "task_id": task.task_id,
+            "final_session_id": current_session_id,
+            "executed_session_ids": executed_session_ids,
+            "status": status,
+            "transcript": transcript,
+            "llm_calls": llm_calls,
+            "llm_models": sorted({str(call.get("model")) for call in llm_calls if call.get("model")}),
+            "usage": usage,
+            "workspace": str(workspace),
+            "exit_code": exit_code,
+            "timed_out": timed_out,
+            "execution_time": execution_time,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
+    finally:
+        if fws_env is not None:
+            stop_fws(fws_env)
 
 
 def run_openclaw_prompt(
@@ -1219,11 +1297,6 @@ def run_openclaw_prompt(
             for i in range(0, total_chunks - 1)
         ]
     for chunk in chunks:
-        elapsed = time.time() - start_time
-        remaining = timeout_seconds - elapsed
-        if remaining <= 0:
-            timed_out = True
-            break
         try:
             command = [
                 "openclaw",
@@ -1242,28 +1315,16 @@ def run_openclaw_prompt(
                 capture_output=True,
                 text=True,
                 cwd=str(workspace),
-                timeout=remaining,
                 check=False,
             )
             stdout += result.stdout
             stderr += result.stderr
             exit_code = result.returncode
-            if result.returncode not in (0, -1) and not timed_out:
+            if result.returncode not in (0, -1):
                 break
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            stdout += _ensure_text(exc.stdout)
-            stderr += _ensure_text(exc.stderr)
-            break
         except FileNotFoundError as exc:
             stderr += f"openclaw command not found: {exc}"
             break
-
-    # Allow a brief window for the gateway to flush remaining messages before
-    # reading the transcript file.  This matters when the CLI subprocess was
-    # killed due to timeout but the server-side session continues writing.
-    if timed_out:
-        time.sleep(3)
 
     transcript = _load_transcript(agent_id, session_id, start_time)
     execution_time = time.time() - start_time
