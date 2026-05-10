@@ -22,6 +22,14 @@ normalize_openclaw_runtime_env() {
 
 normalize_openclaw_runtime_env
 
+openclaw_cmd() {
+  if [[ -n "${OPENCLAW_PROFILE:-}" ]]; then
+    openclaw --profile "${OPENCLAW_PROFILE}" "$@"
+  else
+    openclaw "$@"
+  fi
+}
+
 promote_tokenpilot_aliases() {
   local key=""
   local legacy_key=""
@@ -620,7 +628,7 @@ PINCHBENCH_APPROVALS_PY
 
 validate_openclaw_runtime_config() {
   local config_path="${OPENCLAW_CONFIG_PATH:-${HOME}/.openclaw/openclaw.json}"
-  OPENCLAW_CONFIG_PATH="${config_path}" openclaw config validate >/dev/null
+  OPENCLAW_CONFIG_PATH="${config_path}" openclaw_cmd config validate >/dev/null
 }
 
 assert_method_runtime_config() {
@@ -934,11 +942,11 @@ PY
       ECOCLAW_UPSTREAM_HTTP_PROXY="${ECOCLAW_UPSTREAM_HTTP_PROXY:-}" \
       ECOCLAW_UPSTREAM_HTTPS_PROXY="${ECOCLAW_UPSTREAM_HTTPS_PROXY:-}" \
       ECOCLAW_UPSTREAM_NO_PROXY="${ECOCLAW_UPSTREAM_NO_PROXY:-}" \
-      openclaw gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
+      openclaw_cmd gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
     local gateway_pid=$!
     local attempts=0
     while [[ ${attempts} -lt 30 ]]; do
-      if openclaw gateway health >/dev/null 2>&1; then
+      if openclaw_cmd gateway health >/dev/null 2>&1; then
         if [[ ! "${skip_method_runtime_patch}" =~ ^(true|1|yes)$ ]]; then
           assert_method_runtime_config
         fi
@@ -951,7 +959,7 @@ PY
     echo "ERROR: forced OpenClaw gateway restart failed. See /tmp/openclaw_gateway.log" >&2
     return 1
   fi
-  if ! openclaw gateway health >/dev/null 2>&1; then
+  if ! openclaw_cmd gateway health >/dev/null 2>&1; then
     echo "OpenClaw gateway is unreachable; starting a local gateway..."
     rm -f /tmp/openclaw_gateway.log
     nohup env \
@@ -963,11 +971,11 @@ PY
       ECOCLAW_UPSTREAM_HTTP_PROXY="${ECOCLAW_UPSTREAM_HTTP_PROXY:-}" \
       ECOCLAW_UPSTREAM_HTTPS_PROXY="${ECOCLAW_UPSTREAM_HTTPS_PROXY:-}" \
       ECOCLAW_UPSTREAM_NO_PROXY="${ECOCLAW_UPSTREAM_NO_PROXY:-}" \
-      openclaw gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
+      openclaw_cmd gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
     local gateway_pid=$!
     local attempts=0
     while [[ ${attempts} -lt 20 ]]; do
-      if openclaw gateway health >/dev/null 2>&1; then
+      if openclaw_cmd gateway health >/dev/null 2>&1; then
         if [[ ! "${skip_method_runtime_patch}" =~ ^(true|1|yes)$ ]]; then
           assert_method_runtime_config
         fi
@@ -977,7 +985,7 @@ PY
       attempts=$((attempts + 1))
       sleep 1
     done
-    if openclaw gateway health >/dev/null 2>&1; then
+    if openclaw_cmd gateway health >/dev/null 2>&1; then
       if [[ ! "${skip_method_runtime_patch}" =~ ^(true|1|yes)$ ]]; then
         assert_method_runtime_config
       fi

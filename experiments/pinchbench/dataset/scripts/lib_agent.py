@@ -78,6 +78,15 @@ OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S = float(
 PINCHBENCH_TMP_ROOT = Path(
     os.environ.get("PINCHBENCH_TMP_ROOT", "/tmp/pinchbench")
 ).resolve()
+OPENCLAW_PROFILE = os.environ.get("OPENCLAW_PROFILE", "").strip()
+
+
+def _openclaw_cmd(*args: str) -> List[str]:
+    cmd = ["openclaw"]
+    if OPENCLAW_PROFILE:
+        cmd.extend(["--profile", OPENCLAW_PROFILE])
+    cmd.extend(args)
+    return cmd
 
 
 def _wait_for_gateway_stability() -> bool:
@@ -91,7 +100,7 @@ def _wait_for_gateway_stability() -> bool:
     while time.monotonic() < deadline:
         try:
             result = subprocess.run(
-                ["openclaw", "gateway", "health"],
+                _openclaw_cmd("gateway", "health"),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -277,7 +286,7 @@ def _get_agent_workspace(agent_id: str) -> Path | None:
     """Get the workspace path for an agent from OpenClaw config."""
     try:
         list_result = subprocess.run(
-            ["openclaw", "agents", "list"],
+            _openclaw_cmd("agents", "list"),
             capture_output=True,
             text=True,
             check=False,
@@ -357,7 +366,7 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
                     workspace_dir,
                 )
                 subprocess.run(
-                    ["openclaw", "agents", "delete", delete_name, "--force"],
+                    _openclaw_cmd("agents", "delete", delete_name, "--force"),
                     capture_output=True,
                     text=True,
                     check=False,
@@ -367,8 +376,7 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
         logger.info("Creating OpenClaw agent %s", agent_id)
         try:
             create_result = subprocess.run(
-                [
-                    "openclaw",
+                _openclaw_cmd(
                     "agents",
                     "add",
                     agent_id,
@@ -377,7 +385,7 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
                     "--workspace",
                     str(workspace_dir),
                     "--non-interactive",
-                ],
+                ),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -559,7 +567,7 @@ def _maybe_log_openclaw_runtime_debug(agent_id: str, workspace: Path) -> None:
     )
     try:
         config_result = subprocess.run(
-            ["openclaw", "config", "file"],
+            _openclaw_cmd("config", "file"),
             capture_output=True,
             text=True,
             check=False,
@@ -576,7 +584,7 @@ def _maybe_log_openclaw_runtime_debug(agent_id: str, workspace: Path) -> None:
         logger.warning("[openclaw-debug] failed to inspect config file: %s", exc)
     try:
         agents_result = subprocess.run(
-            ["openclaw", "agents", "list"],
+            _openclaw_cmd("agents", "list"),
             capture_output=True,
             text=True,
             check=False,
@@ -1321,14 +1329,15 @@ def execute_openclaw_task(
             try:
                 _maybe_log_openclaw_runtime_debug(agent_id, workspace)
                 command = [
-                    "openclaw",
-                    "agent",
-                    "--agent",
-                    agent_id,
-                    "--session-id",
-                    current_session_id,
-                    "--message",
-                    current_prompt,
+                    *_openclaw_cmd(
+                        "agent",
+                        "--agent",
+                        agent_id,
+                        "--session-id",
+                        current_session_id,
+                        "--message",
+                        current_prompt,
+                    )
                 ]
                 if use_local:
                     command.append("--local")

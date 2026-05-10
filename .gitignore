@@ -10,6 +10,7 @@ packages/openclaw-plugin/*.tgz
 log/
 
 experiments/pinchbench/save/
+experiments/pinchbench/dataset/save/
 
 experiments/claw-eval/save/
 experiments/claw-eval/dataset/
