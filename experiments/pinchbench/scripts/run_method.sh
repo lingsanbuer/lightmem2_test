@@ -6,6 +6,11 @@ PINCHBENCH_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
 
+log_runtime_step() {
+  local step="$1"
+  printf '[run-method][%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${step}"
+}
+
 MODEL=""
 JUDGE=""
 SUITE=""
@@ -49,17 +54,39 @@ require_method_runtime_env
 apply_runtime_env
 if [[ "${PHASE}" != "eval" ]]; then
   export TOKENPILOT_FORCE_GATEWAY_RESTART="${TOKENPILOT_FORCE_GATEWAY_RESTART:-true}"
+  log_runtime_step "recover_stale_openclaw_config_backup:start"
   recover_stale_openclaw_config_backup
+  log_runtime_step "recover_stale_openclaw_config_backup:done"
+  log_runtime_step "ensure_plugin_runtime_config:start"
   ensure_plugin_runtime_config
+  log_runtime_step "ensure_plugin_runtime_config:done"
+  log_runtime_step "sanitize_plugin_runtime_config:start"
   sanitize_plugin_runtime_config
+  log_runtime_step "sanitize_plugin_runtime_config:done"
+  log_runtime_step "ensure_pinchbench_exec_approvals:start"
   ensure_pinchbench_exec_approvals
+  log_runtime_step "ensure_pinchbench_exec_approvals:done"
+  log_runtime_step "validate_openclaw_runtime_config:start"
   validate_openclaw_runtime_config
+  log_runtime_step "validate_openclaw_runtime_config:done"
+  log_runtime_step "assert_method_runtime_config:start"
   assert_method_runtime_config
+  log_runtime_step "assert_method_runtime_config:done"
+  log_runtime_step "ensure_openclaw_gateway_running:start"
   ensure_openclaw_gateway_running
+  log_runtime_step "ensure_openclaw_gateway_running:done"
+  log_runtime_step "sanitize_plugin_runtime_config:post-gateway:start"
   sanitize_plugin_runtime_config
+  log_runtime_step "sanitize_plugin_runtime_config:post-gateway:done"
+  log_runtime_step "ensure_pinchbench_exec_approvals:post-gateway:start"
   ensure_pinchbench_exec_approvals
+  log_runtime_step "ensure_pinchbench_exec_approvals:post-gateway:done"
+  log_runtime_step "validate_openclaw_runtime_config:post-gateway:start"
   validate_openclaw_runtime_config
+  log_runtime_step "validate_openclaw_runtime_config:post-gateway:done"
+  log_runtime_step "assert_method_runtime_config:post-gateway:start"
   assert_method_runtime_config
+  log_runtime_step "assert_method_runtime_config:post-gateway:done"
 fi
 
 if [[ -z "${PINCHBENCH_DATASET_DIR:-}" && -d "${PINCHBENCH_ROOT}/dataset" ]]; then
@@ -184,8 +211,12 @@ if [[ "${PHASE}" == "eval" ]]; then
     --judge "${RESOLVED_JUDGE}" \
     2>&1 | tee "${RUN_LOG_FILE}"
 else
+  log_runtime_step "start_live_debug_tails:start"
   start_live_debug_tails
+  log_runtime_step "start_live_debug_tails:done"
+  log_runtime_step "benchmark.py:start"
   uv run scripts/benchmark.py "${BENCH_ARGS[@]}" 2>&1 | tee "${RUN_LOG_FILE}"
+  log_runtime_step "benchmark.py:done"
   cleanup_live_debug_tails
 fi
 

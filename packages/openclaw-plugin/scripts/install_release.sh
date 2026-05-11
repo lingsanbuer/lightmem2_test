@@ -9,9 +9,28 @@ export XDG_CACHE_HOME="${HOME}/.cache"
 export XDG_CONFIG_HOME="${HOME}/.config"
 mkdir -p "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}"
 CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-$HOME/.openclaw/openclaw.json}"
+OPENCLAW_PROFILE="${OPENCLAW_PROFILE:-}"
+OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-}"
 DEV_PLUGIN_PATH="${PLUGIN_DIR}"
 INSTALLED_PLUGIN_PATH="${HOME}/.openclaw/extensions/tokenpilot"
 LEGACY_INSTALLED_PLUGIN_PATH="${HOME}/.openclaw/extensions/ecoclaw"
+
+openclaw_cmd() {
+  local -a cmd=("openclaw")
+  if [[ -n "${OPENCLAW_PROFILE}" ]]; then
+    cmd+=("--profile" "${OPENCLAW_PROFILE}")
+  fi
+  cmd+=("$@")
+  env \
+    HOME="${HOME}" \
+    XDG_CACHE_HOME="${XDG_CACHE_HOME}" \
+    XDG_CONFIG_HOME="${XDG_CONFIG_HOME}" \
+    OPENCLAW_CONFIG_PATH="${CONFIG_PATH}" \
+    OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR}" \
+    ${OPENCLAW_GATEWAY_PORT:+OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT}"} \
+    "${cmd[@]}"
+}
 
 sanitize_plugin_config() {
   if [[ ! -f "${CONFIG_PATH}" ]]; then
@@ -90,6 +109,7 @@ allowed_top_level = {
     "eviction",
     "reduction",
     "taskStateEstimator",
+    "memory",
 }
 for key in list(tokenpilot_cfg.keys()):
     if key not in allowed_top_level:
@@ -171,8 +191,8 @@ archive_path="$("${SCRIPT_DIR}/pack_release.sh")"
 prepare_config_for_install
 rm -rf "${INSTALLED_PLUGIN_PATH}" "${LEGACY_INSTALLED_PLUGIN_PATH}"
 
-openclaw plugins install "${archive_path}"
+openclaw_cmd plugins install "${archive_path}"
 sanitize_plugin_config
-openclaw gateway restart
+openclaw_cmd gateway restart
 
 printf 'Installed release plugin from %s\n' "${archive_path}"

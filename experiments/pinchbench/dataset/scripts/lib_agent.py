@@ -76,6 +76,14 @@ OPENCLAW_GATEWAY_STABLE_POLL_S = float(
 OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S = float(
     os.environ.get("PINCHBENCH_OPENCLAW_GATEWAY_STABLE_MAX_WAIT_S", "12.0")
 )
+OPENCLAW_GATEWAY_RESTART_ON_AGENT_REWRITE = os.environ.get(
+    "PINCHBENCH_OPENCLAW_GATEWAY_RESTART_ON_AGENT_REWRITE", "true"
+).strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 PINCHBENCH_TMP_ROOT = Path(
     os.environ.get("PINCHBENCH_TMP_ROOT", "/tmp/pinchbench")
 ).resolve()
@@ -118,6 +126,36 @@ def _wait_for_gateway_stability() -> bool:
             stable = 0
         time.sleep(poll_s)
     return False
+
+
+def _restart_gateway_after_agent_rewrite() -> bool:
+    try:
+        result = subprocess.run(
+            _openclaw_cmd("gateway", "restart"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env=_build_openclaw_subprocess_env(),
+        )
+    except FileNotFoundError:
+        logger.error("openclaw CLI not found while restarting gateway")
+        return False
+    except Exception as exc:
+        logger.warning("Failed to restart gateway after agent rewrite: %s", exc)
+        return False
+
+    if result.returncode != 0:
+        logger.warning(
+            "Gateway restart after agent rewrite returned %s: stdout=%s stderr=%s",
+            result.returncode,
+            result.stdout.strip(),
+            result.stderr.strip(),
+        )
+        return False
+
+    logger.info("Restarted OpenClaw gateway after agent config rewrite")
+    return True
 
 
 def _build_openclaw_subprocess_env() -> Dict[str, str]:
@@ -401,6 +439,8 @@ def ensure_agent_exists(agent_id: str, model_id: str, workspace_dir: Path) -> bo
             logger.warning(
                 "Agent creation returned %s: %s", create_result.returncode, create_result.stderr
             )
+        elif OPENCLAW_GATEWAY_RESTART_ON_AGENT_REWRITE:
+            _restart_gateway_after_agent_rewrite()
         if OPENCLAW_AGENT_CONFIG_SETTLE_S > 0:
             logger.info(
                 "Waiting %.1fs for OpenClaw gateway to settle after agent config rewrite",

@@ -30,6 +30,14 @@ openclaw_cmd() {
   fi
 }
 
+openclaw_cmd_array() {
+  if [[ -n "${OPENCLAW_PROFILE:-}" ]]; then
+    printf '%s\0' openclaw --profile "${OPENCLAW_PROFILE}" "$@"
+  else
+    printf '%s\0' openclaw "$@"
+  fi
+}
+
 import_dotenv() {
   local env_path="${1:-${REPO_ROOT}/.env}"
   if [[ ! -f "${env_path}" ]]; then
@@ -235,12 +243,22 @@ ensure_plugin_runtime_config() {
   local task_state_estimator_lifecycle_mode="${TOKENPILOT_TASK_STATE_ESTIMATOR_LIFECYCLE_MODE:-__KEEP__}"
   local task_state_estimator_eviction_promotion_policy="${TOKENPILOT_TASK_STATE_ESTIMATOR_EVICTION_PROMOTION_POLICY:-__KEEP__}"
   local task_state_estimator_eviction_promotion_hot_tail_size="${TOKENPILOT_TASK_STATE_ESTIMATOR_EVICTION_PROMOTION_HOT_TAIL_SIZE:-__KEEP__}"
+  local memory_enabled="${TOKENPILOT_MEMORY_ENABLED:-__KEEP__}"
+  local memory_auto_distill="${TOKENPILOT_MEMORY_AUTO_DISTILL:-__KEEP__}"
+  local memory_distiller_type="${TOKENPILOT_MEMORY_DISTILLER_TYPE:-__KEEP__}"
+  local memory_batch_size="${TOKENPILOT_MEMORY_BATCH_SIZE:-__KEEP__}"
+  local memory_top_k="${TOKENPILOT_MEMORY_TOP_K:-__KEEP__}"
+  local memory_inject_as_system_hint="${TOKENPILOT_MEMORY_INJECT_AS_SYSTEM_HINT:-__KEEP__}"
+  local memory_distill_base_url="${TOKENPILOT_MEMORY_DISTILL_BASE_URL:-__KEEP__}"
+  local memory_distill_api_key="${TOKENPILOT_MEMORY_DISTILL_API_KEY:-__KEEP__}"
+  local memory_distill_model="${TOKENPILOT_MEMORY_DISTILL_MODEL:-__KEEP__}"
+  local memory_distill_timeout_ms="${TOKENPILOT_MEMORY_DISTILL_TIMEOUT_MS:-__KEEP__}"
   if [[ ! -f "${config_path}" ]]; then
     echo "WARN: openclaw config not found, skip plugin runtime config patch: ${config_path}" >&2
     return 0
   fi
 
-  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${plugin_load_path}" "${proxy_pure_forward}" "${enable_reduction}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${default_model}" "${exec_host}" "${exec_security}" "${exec_ask}" "${elevated_enabled}" "${elevated_allow_from}" "${enable_eviction}" "${eviction_policy}" "${eviction_min_block_chars}" "${eviction_replacement_mode}" "${task_state_estimator_enabled}" "${task_state_estimator_base_url}" "${task_state_estimator_api_key}" "${task_state_estimator_model}" "${task_state_estimator_request_timeout_ms}" "${task_state_estimator_batch_turns}" "${task_state_estimator_eviction_lookahead_turns}" "${task_state_estimator_input_mode}" "${task_state_estimator_lifecycle_mode}" "${task_state_estimator_eviction_promotion_policy}" "${task_state_estimator_eviction_promotion_hot_tail_size}" <<'PATCH_PY'
+  python3 - "${config_path}" "${proxy_base_url}" "${proxy_api_key}" "${proxy_port}" "${plugin_load_path}" "${proxy_pure_forward}" "${enable_reduction}" "${reduction_trigger_min_chars}" "${reduction_max_tool_chars}" "${reduction_pass_repeated_read_dedup}" "${reduction_pass_tool_payload_trim}" "${reduction_pass_html_slimming}" "${reduction_pass_exec_output_truncation}" "${reduction_pass_agents_startup_optimization}" "${default_model}" "${exec_host}" "${exec_security}" "${exec_ask}" "${elevated_enabled}" "${elevated_allow_from}" "${enable_eviction}" "${eviction_policy}" "${eviction_min_block_chars}" "${eviction_replacement_mode}" "${task_state_estimator_enabled}" "${task_state_estimator_base_url}" "${task_state_estimator_api_key}" "${task_state_estimator_model}" "${task_state_estimator_request_timeout_ms}" "${task_state_estimator_batch_turns}" "${task_state_estimator_eviction_lookahead_turns}" "${task_state_estimator_input_mode}" "${task_state_estimator_lifecycle_mode}" "${task_state_estimator_eviction_promotion_policy}" "${task_state_estimator_eviction_promotion_hot_tail_size}" "${memory_enabled}" "${memory_auto_distill}" "${memory_distiller_type}" "${memory_batch_size}" "${memory_top_k}" "${memory_inject_as_system_hint}" "${memory_distill_base_url}" "${memory_distill_api_key}" "${memory_distill_model}" "${memory_distill_timeout_ms}" <<'PATCH_PY'
 import json
 import os
 import sys
@@ -281,7 +299,17 @@ import sys
     task_state_estimator_lifecycle_mode,
     task_state_estimator_eviction_promotion_policy,
     task_state_estimator_eviction_promotion_hot_tail_size_raw,
- ) = sys.argv[1:36]
+    memory_enabled_raw,
+    memory_auto_distill_raw,
+    memory_distiller_type,
+    memory_batch_size_raw,
+    memory_top_k_raw,
+    memory_inject_as_system_hint_raw,
+    memory_distill_base_url,
+    memory_distill_api_key,
+    memory_distill_model,
+    memory_distill_timeout_ms_raw,
+) = sys.argv[1:46]
 
 proxy_port = int(proxy_port_raw)
 proxy_pure_forward = str(proxy_pure_forward_raw).strip().lower() in ("1", "true", "yes", "on")
@@ -309,6 +337,16 @@ keep_estimator_input_mode = task_state_estimator_input_mode == "__KEEP__"
 keep_estimator_lifecycle_mode = task_state_estimator_lifecycle_mode == "__KEEP__"
 keep_estimator_eviction_promotion_policy = task_state_estimator_eviction_promotion_policy == "__KEEP__"
 keep_estimator_eviction_promotion_hot_tail_size = task_state_estimator_eviction_promotion_hot_tail_size_raw == "__KEEP__"
+keep_memory_enabled = memory_enabled_raw == "__KEEP__"
+keep_memory_auto_distill = memory_auto_distill_raw == "__KEEP__"
+keep_memory_distiller_type = memory_distiller_type == "__KEEP__"
+keep_memory_batch_size = memory_batch_size_raw == "__KEEP__"
+keep_memory_top_k = memory_top_k_raw == "__KEEP__"
+keep_memory_inject_as_system_hint = memory_inject_as_system_hint_raw == "__KEEP__"
+keep_memory_distill_base_url = memory_distill_base_url == "__KEEP__"
+keep_memory_distill_api_key = memory_distill_api_key == "__KEEP__"
+keep_memory_distill_model = memory_distill_model == "__KEEP__"
+keep_memory_distill_timeout_ms = memory_distill_timeout_ms_raw == "__KEEP__"
 
 if keep_estimator_enabled and (
     (not keep_estimator_base_url and task_state_estimator_base_url.strip())
@@ -322,6 +360,12 @@ task_state_estimator_request_timeout_ms = None if keep_estimator_request_timeout
 task_state_estimator_batch_turns = None if keep_estimator_batch_turns else int(task_state_estimator_batch_turns_raw)
 task_state_estimator_eviction_lookahead_turns = None if keep_estimator_eviction_lookahead_turns else int(task_state_estimator_eviction_lookahead_turns_raw)
 task_state_estimator_eviction_promotion_hot_tail_size = None if keep_estimator_eviction_promotion_hot_tail_size else int(task_state_estimator_eviction_promotion_hot_tail_size_raw)
+memory_enabled = parse_bool(memory_enabled_raw)
+memory_auto_distill = parse_bool(memory_auto_distill_raw)
+memory_batch_size = None if keep_memory_batch_size else int(memory_batch_size_raw)
+memory_top_k = None if keep_memory_top_k else int(memory_top_k_raw)
+memory_inject_as_system_hint = parse_bool(memory_inject_as_system_hint_raw)
+memory_distill_timeout_ms = None if keep_memory_distill_timeout_ms else int(memory_distill_timeout_ms_raw)
 
 with open(config_path, "r", encoding="utf-8") as f:
     cfg = json.load(f)
@@ -458,6 +502,29 @@ if not keep_estimator_eviction_promotion_policy:
 if not keep_estimator_eviction_promotion_hot_tail_size:
     task_state_estimator["evictionPromotionHotTailSize"] = max(0, task_state_estimator_eviction_promotion_hot_tail_size)
 
+memory = tokenpilot_cfg.setdefault("memory", {})
+if not keep_memory_enabled:
+    memory["enabled"] = memory_enabled
+if not keep_memory_auto_distill:
+    memory["autoDistill"] = memory_auto_distill
+if not keep_memory_distiller_type and memory_distiller_type.strip():
+    memory["distillerType"] = memory_distiller_type.strip()
+if not keep_memory_batch_size:
+    memory["batchSize"] = max(1, memory_batch_size)
+if not keep_memory_top_k:
+    memory["topK"] = max(0, memory_top_k)
+if not keep_memory_inject_as_system_hint:
+    memory["injectAsSystemHint"] = memory_inject_as_system_hint
+distill_provider = memory.setdefault("distillProvider", {})
+if not keep_memory_distill_base_url and memory_distill_base_url.strip():
+    distill_provider["baseUrl"] = memory_distill_base_url.strip()
+if not keep_memory_distill_api_key and memory_distill_api_key.strip():
+    distill_provider["apiKey"] = memory_distill_api_key.strip()
+if not keep_memory_distill_model and memory_distill_model.strip():
+    distill_provider["model"] = memory_distill_model.strip()
+if not keep_memory_distill_timeout_ms:
+    distill_provider["requestTimeoutMs"] = max(1000, memory_distill_timeout_ms)
+
 tmp_path = f"{config_path}.tmp"
 with open(tmp_path, "w", encoding="utf-8") as f:
     json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -487,9 +554,16 @@ print(
     f"taskStateEstimatorLifecycleMode={task_state_estimator.get('lifecycleMode')}",
     f"taskStateEstimatorPromotionPolicy={task_state_estimator.get('evictionPromotionPolicy')}",
     f"taskStateEstimatorHotTailSize={task_state_estimator.get('evictionPromotionHotTailSize')}",
+    f"memoryEnabled={memory.get('enabled')}",
+    f"memoryAutoDistill={memory.get('autoDistill')}",
+    f"memoryDistillerType={memory.get('distillerType')}",
+    f"memoryBatchSize={memory.get('batchSize')}",
+    f"memoryTopK={memory.get('topK')}",
     f"fallbacks={len(model_defaults.get('fallbacks', []))}",
 )
 PATCH_PY
+
+  dump_tokenpilot_runtime_config_snapshot "after-ensure-plugin-runtime-config"
 }
 
 sanitize_plugin_runtime_config() {
@@ -532,6 +606,7 @@ allowed_top_level = {
     "eviction",
     "reduction",
     "taskStateEstimator",
+    "memory",
 }
 for key in list(tokenpilot_cfg.keys()):
     if key not in allowed_top_level:
@@ -563,6 +638,52 @@ with open(tmp_path, "w", encoding="utf-8") as f:
     f.write("\n")
 os.replace(tmp_path, config_path)
 SANITIZE_PY
+
+  dump_tokenpilot_runtime_config_snapshot "after-sanitize-plugin-runtime-config"
+}
+
+dump_tokenpilot_runtime_config_snapshot() {
+  local stage="${1:-snapshot}"
+  local config_path="${OPENCLAW_CONFIG_PATH:-${HOME}/.openclaw/openclaw.json}"
+  if [[ ! -f "${config_path}" ]]; then
+    echo "[tokenpilot-config:${stage}] missing config: ${config_path}"
+    return 0
+  fi
+  python3 - "${stage}" "${config_path}" <<'DUMP_CFG_PY'
+import json
+import sys
+
+stage, config_path = sys.argv[1:3]
+with open(config_path, "r", encoding="utf-8") as f:
+    cfg = json.load(f)
+
+plugins = cfg.get("plugins", {})
+entries = plugins.get("entries", {})
+tokenpilot = entries.get("tokenpilot") or {}
+tokenpilot_cfg = tokenpilot.get("config")
+
+def compact(section):
+    if not isinstance(section, dict):
+        return section
+    return {
+        "taskStateEstimator": section.get("taskStateEstimator"),
+        "memory": section.get("memory"),
+    }
+
+print(
+    "[tokenpilot-config:%s] %s"
+    % (
+        stage,
+        json.dumps(
+            {
+                "entries.tokenpilot.enabled": tokenpilot.get("enabled"),
+                "entries.tokenpilot.config": compact(tokenpilot_cfg),
+            },
+            ensure_ascii=False,
+        ),
+    )
+)
+DUMP_CFG_PY
 }
 
 ensure_pinchbench_exec_approvals() {
@@ -910,6 +1031,8 @@ PY
   if [[ "${force_restart}" =~ ^(true|1|yes)$ ]]; then
     echo "Forcing OpenClaw gateway restart on port ${gateway_port}..."
     rm -f /tmp/openclaw_gateway.log
+    local -a gateway_cmd=()
+    mapfile -d '' -t gateway_cmd < <(openclaw_cmd_array gateway run --force --port "${gateway_port}")
     nohup env \
       HOME="${HOME}" \
       OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH}" \
@@ -919,7 +1042,7 @@ PY
       TOKENPILOT_UPSTREAM_HTTP_PROXY="${TOKENPILOT_UPSTREAM_HTTP_PROXY:-}" \
       TOKENPILOT_UPSTREAM_HTTPS_PROXY="${TOKENPILOT_UPSTREAM_HTTPS_PROXY:-}" \
       TOKENPILOT_UPSTREAM_NO_PROXY="${TOKENPILOT_UPSTREAM_NO_PROXY:-}" \
-      openclaw_cmd gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
+      "${gateway_cmd[@]}" >/tmp/openclaw_gateway.log 2>&1 &
     local gateway_pid=$!
     local attempts=0
     while [[ ${attempts} -lt 30 ]]; do
@@ -939,6 +1062,8 @@ PY
   if ! openclaw_cmd gateway health >/dev/null 2>&1; then
     echo "OpenClaw gateway is unreachable; starting a local gateway..."
     rm -f /tmp/openclaw_gateway.log
+    local -a gateway_cmd=()
+    mapfile -d '' -t gateway_cmd < <(openclaw_cmd_array gateway run --force --port "${gateway_port}")
     nohup env \
       HOME="${HOME}" \
       OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH}" \
@@ -948,7 +1073,7 @@ PY
       TOKENPILOT_UPSTREAM_HTTP_PROXY="${TOKENPILOT_UPSTREAM_HTTP_PROXY:-}" \
       TOKENPILOT_UPSTREAM_HTTPS_PROXY="${TOKENPILOT_UPSTREAM_HTTPS_PROXY:-}" \
       TOKENPILOT_UPSTREAM_NO_PROXY="${TOKENPILOT_UPSTREAM_NO_PROXY:-}" \
-      openclaw_cmd gateway run --force --port "${gateway_port}" >/tmp/openclaw_gateway.log 2>&1 &
+      "${gateway_cmd[@]}" >/tmp/openclaw_gateway.log 2>&1 &
     local gateway_pid=$!
     local attempts=0
     while [[ ${attempts} -lt 20 ]]; do
