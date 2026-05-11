@@ -23,6 +23,7 @@ function createStubDistiller(): SkillDistiller {
           "Reuse the validated procedure",
           "Avoid previously observed pitfalls",
         ],
+        facts: ["Preserve transcript-grounded specifics that materially affected correctness."],
         pitfalls: entry.unresolvedQuestions.length > 0 ? entry.unresolvedQuestions : ["Do not skip validation"],
         constraints: ["session-bound memory only"],
         evidence: [...entry.completionEvidence],

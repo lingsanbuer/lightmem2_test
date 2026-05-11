@@ -114,6 +114,7 @@ export function makeFallbackSkill(sessionId: string, entry: ProceduralMemoryQueu
   guidance: string;
   whenToUse: string[];
   steps: string[];
+  facts?: string[];
   pitfalls: string[];
   constraints: string[];
 }): ProceduralSkill {
@@ -122,11 +123,12 @@ export function makeFallbackSkill(sessionId: string, entry: ProceduralMemoryQueu
   const embeddingText = [
     entry.objective,
     guidance.title,
+    ...(guidance.facts ?? []),
     guidance.guidance,
     ...guidance.whenToUse,
-    ...guidance.steps,
     ...guidance.pitfalls,
     ...guidance.constraints,
+    ...guidance.steps,
   ].join("\n");
   return {
     skillId: makeSkillId(entry.taskId, guidance.guidance),
@@ -137,6 +139,7 @@ export function makeFallbackSkill(sessionId: string, entry: ProceduralMemoryQueu
     guidance: guidance.guidance,
     whenToUse: guidance.whenToUse,
     steps: guidance.steps,
+    facts: (guidance.facts ?? []).filter((item) => item.trim().length > 0),
     pitfalls: guidance.pitfalls,
     constraints: guidance.constraints,
     evidence,

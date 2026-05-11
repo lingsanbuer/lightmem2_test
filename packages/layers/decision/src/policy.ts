@@ -1621,98 +1621,31 @@ async function maybeRunTaskStateEstimator(
     };
   }
 
-  const output = await estimator.estimate({
-    registry,
-    delta,
-  });
-  const normalizedTaskUpdates = normalizeTaskUpdatesForLifecycleMode(
-    output.taskUpdates,
-    config.taskStateEstimator.lifecycleMode,
-  );
-  await appendTaskStateTrace(config.stateDir, {
-    stage: "estimator_output",
-    sessionId: ctx.sessionId,
-    baseVersion: output.baseVersion,
-    lifecycleMode: config.taskStateEstimator.lifecycleMode,
-    taskUpdates: normalizedTaskUpdates.map((update) => ({
-      taskId: update.taskId,
-      lifecycle: update.lifecycle,
-      coveredTurnAbsIds: update.coveredTurnAbsIds ?? [],
-    })),
-  });
-  if (output.baseVersion !== registry.version) {
-    await appendTaskStateTrace(config.stateDir, {
-      stage: "estimator_skipped",
-      sessionId: ctx.sessionId,
-      reason: "base_version_mismatch",
-      outputBaseVersion: output.baseVersion,
-      registryVersion: registry.version,
-    });
-    return {
-      registry,
-      decision: {
-        enabled: true,
-        attempted: true,
-        applied: false,
-        baseVersion: output.baseVersion,
-        nextVersion: registry.version,
-        coveredTurnAbsIds: delta.coveredTurnAbsIds,
-        touchedTaskIds: normalizedTaskUpdates.map((update) => update.taskId),
-        transitionCount: normalizedTaskUpdates.length,
-        transitions: [],
-        rejectedUpdates: [],
-        note: "base_version_mismatch",
-      },
-    };
-  }
-
-  const built = buildPatchFromTaskUpdates(
-    registry,
-    normalizedTaskUpdates,
-    delta.coveredTurnAbsIds,
-    estimatorWindow.toTurnSeqInclusive,
-  );
-  if (built.rejectedUpdates.length > 0) {
-    await appendTaskStateTrace(config.stateDir, {
-      stage: "estimator_updates_rejected",
-      sessionId: ctx.sessionId,
-      rejectedUpdates: built.rejectedUpdates,
-    });
-  }
-  let nextRegistry = applySessionTaskRegistryPatch(registry, built.patch);
-  if (
-    config.taskStateEstimator.lifecycleMode === "decoupled"
-    && config.taskStateEstimator.evictionPromotionPolicy === "fifo"
-  ) {
-    const promotion = buildDecoupledFifoPromotionPatch(
-      nextRegistry,
-      config.taskStateEstimator.evictionPromotionHotTailSize,
-    );
-    if (promotion.promotedTaskIds.length > 0) {
-      nextRegistry = applySessionTaskRegistryPatch(nextRegistry, promotion.patch);
-      await appendTaskStateTrace(config.stateDir, {
-        stage: "eviction_promotion_applied",
-        sessionId: ctx.sessionId,
-        lifecycleMode: config.taskStateEstimator.lifecycleMode,
-        policy: config.taskStateEstimator.evictionPromotionPolicy,
-        hotTailSize: config.taskStateEstimator.evictionPromotionHotTailSize,
-        promotedTaskIds: promotion.promotedTaskIds,
-        preservedCompletedTaskIds: promotion.preservedCompletedTaskIds,
-        completedTaskIds: nextRegistry.completedTaskIds,
-        evictableTaskIds: nextRegistry.evictableTaskIds,
-      });
-    }
-  }
   try {
-    await persistSessionTaskRegistry(config.stateDir, nextRegistry, {
-      expectedVersion: registry.version,
+    const output = await estimator.estimate({
+      registry,
+      delta,
     });
-  } catch (error) {
-    if (error instanceof SessionTaskRegistryVersionMismatchError) {
+    const normalizedTaskUpdates = normalizeTaskUpdatesForLifecycleMode(
+      output.taskUpdates,
+      config.taskStateEstimator.lifecycleMode,
+    );
+    await appendTaskStateTrace(config.stateDir, {
+      stage: "estimator_output",
+      sessionId: ctx.sessionId,
+      baseVersion: output.baseVersion,
+      lifecycleMode: config.taskStateEstimator.lifecycleMode,
+      taskUpdates: normalizedTaskUpdates.map((update) => ({
+        taskId: update.taskId,
+        lifecycle: update.lifecycle,
+        coveredTurnAbsIds: update.coveredTurnAbsIds ?? [],
+      })),
+    });
+    if (output.baseVersion !== registry.version) {
       await appendTaskStateTrace(config.stateDir, {
         stage: "estimator_skipped",
         sessionId: ctx.sessionId,
-        reason: "persist_version_mismatch",
+        reason: "base_version_mismatch",
         outputBaseVersion: output.baseVersion,
         registryVersion: registry.version,
       });
@@ -1725,41 +1658,134 @@ async function maybeRunTaskStateEstimator(
           baseVersion: output.baseVersion,
           nextVersion: registry.version,
           coveredTurnAbsIds: delta.coveredTurnAbsIds,
-          touchedTaskIds: built.touchedTaskIds,
-          transitionCount: built.transitions.length,
-          transitions: built.transitions,
-          rejectedUpdates: built.rejectedUpdates,
-          note: "persist_version_mismatch",
+          touchedTaskIds: normalizedTaskUpdates.map((update) => update.taskId),
+          transitionCount: normalizedTaskUpdates.length,
+          transitions: [],
+          rejectedUpdates: [],
+          note: "base_version_mismatch",
         },
       };
     }
-    throw error;
-  }
-  await appendTaskStateTrace(config.stateDir, {
-    stage: "registry_persisted",
-    sessionId: ctx.sessionId,
-    previousVersion: registry.version,
-    nextVersion: nextRegistry.version,
-    lastProcessedTurnSeq: nextRegistry.lastProcessedTurnSeq,
-    touchedTaskIds: built.touchedTaskIds,
-    transitionCount: built.transitions.length,
-  });
 
-  return {
-    registry: nextRegistry,
-    decision: {
-      enabled: true,
-      attempted: true,
-      applied: true,
-      baseVersion: output.baseVersion,
+    const built = buildPatchFromTaskUpdates(
+      registry,
+      normalizedTaskUpdates,
+      delta.coveredTurnAbsIds,
+      estimatorWindow.toTurnSeqInclusive,
+    );
+    if (built.rejectedUpdates.length > 0) {
+      await appendTaskStateTrace(config.stateDir, {
+        stage: "estimator_updates_rejected",
+        sessionId: ctx.sessionId,
+        rejectedUpdates: built.rejectedUpdates,
+      });
+    }
+    let nextRegistry = applySessionTaskRegistryPatch(registry, built.patch);
+    if (
+      config.taskStateEstimator.lifecycleMode === "decoupled"
+      && config.taskStateEstimator.evictionPromotionPolicy === "fifo"
+    ) {
+      const promotion = buildDecoupledFifoPromotionPatch(
+        nextRegistry,
+        config.taskStateEstimator.evictionPromotionHotTailSize,
+      );
+      if (promotion.promotedTaskIds.length > 0) {
+        nextRegistry = applySessionTaskRegistryPatch(nextRegistry, promotion.patch);
+        await appendTaskStateTrace(config.stateDir, {
+          stage: "eviction_promotion_applied",
+          sessionId: ctx.sessionId,
+          lifecycleMode: config.taskStateEstimator.lifecycleMode,
+          policy: config.taskStateEstimator.evictionPromotionPolicy,
+          hotTailSize: config.taskStateEstimator.evictionPromotionHotTailSize,
+          promotedTaskIds: promotion.promotedTaskIds,
+          preservedCompletedTaskIds: promotion.preservedCompletedTaskIds,
+          completedTaskIds: nextRegistry.completedTaskIds,
+          evictableTaskIds: nextRegistry.evictableTaskIds,
+        });
+      }
+    }
+    try {
+      await persistSessionTaskRegistry(config.stateDir, nextRegistry, {
+        expectedVersion: registry.version,
+      });
+    } catch (error) {
+      if (error instanceof SessionTaskRegistryVersionMismatchError) {
+        await appendTaskStateTrace(config.stateDir, {
+          stage: "estimator_skipped",
+          sessionId: ctx.sessionId,
+          reason: "persist_version_mismatch",
+          outputBaseVersion: output.baseVersion,
+          registryVersion: registry.version,
+        });
+        return {
+          registry,
+          decision: {
+            enabled: true,
+            attempted: true,
+            applied: false,
+            baseVersion: output.baseVersion,
+            nextVersion: registry.version,
+            coveredTurnAbsIds: delta.coveredTurnAbsIds,
+            touchedTaskIds: built.touchedTaskIds,
+            transitionCount: built.transitions.length,
+            transitions: built.transitions,
+            rejectedUpdates: built.rejectedUpdates,
+            note: "persist_version_mismatch",
+          },
+        };
+      }
+      throw error;
+    }
+    await appendTaskStateTrace(config.stateDir, {
+      stage: "registry_persisted",
+      sessionId: ctx.sessionId,
+      previousVersion: registry.version,
       nextVersion: nextRegistry.version,
-      coveredTurnAbsIds: delta.coveredTurnAbsIds,
+      lastProcessedTurnSeq: nextRegistry.lastProcessedTurnSeq,
       touchedTaskIds: built.touchedTaskIds,
       transitionCount: built.transitions.length,
-      transitions: built.transitions,
-      rejectedUpdates: built.rejectedUpdates,
-    },
-  };
+    });
+
+    return {
+      registry: nextRegistry,
+      decision: {
+        enabled: true,
+        attempted: true,
+        applied: true,
+        baseVersion: output.baseVersion,
+        nextVersion: nextRegistry.version,
+        coveredTurnAbsIds: delta.coveredTurnAbsIds,
+        touchedTaskIds: built.touchedTaskIds,
+        transitionCount: built.transitions.length,
+        transitions: built.transitions,
+        rejectedUpdates: built.rejectedUpdates,
+      },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const name = error instanceof Error ? error.name : null;
+    const stack =
+      error instanceof Error && typeof error.stack === "string"
+        ? error.stack.split("\n").slice(0, 6)
+        : [];
+    await appendTaskStateTrace(config.stateDir, {
+      stage: "estimator_error",
+      sessionId: ctx.sessionId,
+      errorName: name,
+      errorMessage: message,
+      errorStack: stack,
+      registryVersion: registry.version,
+      lastProcessedTurnSeq: registry.lastProcessedTurnSeq,
+      coveredTurnAbsIds: delta.coveredTurnAbsIds,
+      availableTurnSeqs: turnSeqs,
+      pendingTurnSeqs,
+      fromTurnSeqExclusive: estimatorWindow.fromTurnSeqExclusive,
+      toTurnSeqInclusive: estimatorWindow.toTurnSeqInclusive,
+      inputMode: config.taskStateEstimator.inputMode,
+      lifecycleMode: config.taskStateEstimator.lifecycleMode,
+    });
+    throw error;
+  }
 }
 
 export function createPolicyModule(cfg: PolicyModuleConfig = {}): RuntimeModule {

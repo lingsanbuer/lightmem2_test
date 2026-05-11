@@ -7,6 +7,7 @@ type DistillResponse = {
     sourceTaskId?: string;
     objective?: string;
     workflow?: string[];
+    facts?: string[];
     tool_patterns?: string[];
     pitfalls?: string[];
   }>;
@@ -68,15 +69,18 @@ function buildSystemPrompt(): string {
     "Return only JSON.",
     "You must return exactly one memory entry per input task.",
     "For each task, use exactly this schema:",
-    "{\"sourceTaskId\":string,\"objective\":string,\"workflow\":string[],\"tool_patterns\":string[],\"pitfalls\":string[]}",
+    "{\"sourceTaskId\":string,\"objective\":string,\"workflow\":string[],\"facts\":string[],\"tool_patterns\":string[],\"pitfalls\":string[]}",
     "Guidelines:",
-    "Objective must abstract away specific names, dates, ids, secrets, and instance-only details. Describe the task type and goal, not the specific case.",
+    "Objective must describe the task goal, not temporary environment state or private secrets.",
+    "Do not erase transcript-grounded anchors that are essential for correctness.",
+    "Use facts for the most useful concrete anchors, such as selected decisions, named owners, deadlines, quotes, tone markers, disambiguating entities, or source-specific constraints.",
+    "facts should contain 2 to 6 short transcript-grounded bullets that would improve correctness on a structurally similar follow-on task in the same session.",
+    "facts must stay faithful to the archived task and should not invent or generalize beyond what the transcript clearly supported.",
     "Preserve the task's true structural domain. Do not broaden a narrow task into a generic modality-level task unless the trajectory clearly supports that broader abstraction.",
     "For example, do not rewrite a restaurant contact lookup into a generic document extraction task, and do not rewrite a finance lookup into a generic OCR task unless OCR itself is the reusable core procedure.",
-    "Workflow must include only non-obvious or task-specific actions or decisions that were actually used or clearly justified by the trajectory. Skip generic reasoning boilerplate. Keep 3 to 5 steps when possible. Order matters.",
+    "Workflow must include only non-obvious or task-specific actions or decisions that were actually used or clearly justified by the trajectory. Skip generic reasoning boilerplate. Keep 2 to 4 steps when possible. Order matters.",
     "Prefer durable task-level procedure and decision logic over incidental one-off interface mistakes.",
-    "For operational or troubleshooting tasks, prefer the high-level remediation loop (detect issues, inspect evidence, apply safe fixes, escalate unresolved cases) over narrow instance details.",
-    "Tool patterns must include only meaningfully used tools, with concise notes on when and how to use them effectively for this task type.",
+    "Tool patterns must include only meaningfully used tools, with concise notes on when and how to use them effectively for this task.",
     "Only include tool or API validation quirks if they materially affected execution and led to a real correction or retry pattern.",
     "Do not let one-off parameter names, literal field values, exact cron times, or exact request shapes dominate the memory unless that detail is clearly the reusable core of the task.",
     "When possible, express tool guidance at the operation level (for example list, inspect, update, notify) rather than at the literal argument-name level.",
@@ -87,7 +91,7 @@ function buildSystemPrompt(): string {
     "Do not add generic domain caveats or speculative risks unless the transcript actually showed them.",
     "If no concrete pitfall was observed, return an empty array rather than inventing pitfalls.",
     "Do not preserve user-private details, temporary file paths, access tokens, or stale environment-specific state.",
-    "Be concise. Keep each memory entry compact and focused on reusable procedure rather than replaying the task.",
+    "Be concise. Keep each memory entry compact and focused on useful factual anchors plus only the minimum reusable procedure needed to apply them.",
     "Wrap all entries under top-level schema: {\"skills\": [...]}",
   ].join(" ");
 }
@@ -111,11 +115,12 @@ function buildSkillFromResponse(
 ): ProceduralSkill {
   const objective = typeof raw?.objective === "string" && raw.objective.trim() ? raw.objective.trim() : entry.objective;
   const workflow = uniqueStrings(raw?.workflow).slice(0, 5);
+  const facts = uniqueStrings(raw?.facts).slice(0, 6);
   const toolPatterns = uniqueStrings(raw?.tool_patterns).slice(0, 5);
   const pitfalls = uniqueStrings(raw?.pitfalls).slice(0, 5);
   const guidance = [
-    `Applicable objective type: ${objective}.`,
-    workflow.length > 0 ? `Workflow: ${workflow.join(" | ")}.` : "",
+    facts.length > 0 ? `Key facts: ${facts.join(" | ")}.` : "",
+    workflow.length > 0 ? `Useful procedure: ${workflow.join(" | ")}.` : "",
     toolPatterns.length > 0 ? `Tool patterns: ${toolPatterns.join(" | ")}.` : "",
     pitfalls.length > 0 ? `Pitfalls: ${pitfalls.join(" | ")}.` : "",
   ]
@@ -126,6 +131,7 @@ function buildSkillFromResponse(
     guidance,
     whenToUse: [objective],
     steps: workflow,
+    facts,
     pitfalls,
     constraints: toolPatterns,
   });

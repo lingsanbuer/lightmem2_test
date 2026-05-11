@@ -27,6 +27,7 @@ export type ProceduralSkill = {
   guidance: string;
   whenToUse: string[];
   steps: string[];
+  facts: string[];
   pitfalls: string[];
   constraints: string[];
   evidence: string[];
