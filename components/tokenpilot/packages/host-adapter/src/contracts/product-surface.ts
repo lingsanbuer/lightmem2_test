@@ -1,7 +1,18 @@
 export type TokenPilotProductCommandContext = any;
 
+export type TokenPilotProductSurfacePayload = {
+  kind:
+    | "text"
+    | "status"
+    | "report"
+    | "doctor"
+    | "visual";
+  data?: Record<string, unknown>;
+};
+
 export type TokenPilotProductCommandResult = {
   text: string;
+  payload?: TokenPilotProductSurfacePayload;
 };
 
 export type TokenPilotProductSurfaceConfigAdapter = {
@@ -19,13 +30,23 @@ export type TokenPilotProductSurfaceConfigStore = {
 };
 
 export type TokenPilotProductSurfaceHostFeatures = {
+  buildReportPayload?(
+    ctx: TokenPilotProductCommandContext,
+    currentConfig: Record<string, unknown>,
+  ): Promise<TokenPilotProductSurfacePayload> | TokenPilotProductSurfacePayload;
   handleReport?(
     ctx: TokenPilotProductCommandContext,
     currentConfig: Record<string, unknown>,
   ): Promise<TokenPilotProductCommandResult> | TokenPilotProductCommandResult;
+  buildDoctorPayload?(
+    currentConfig: Record<string, unknown>,
+  ): Promise<TokenPilotProductSurfacePayload> | TokenPilotProductSurfacePayload;
   handleDoctor?(
     currentConfig: Record<string, unknown>,
   ): Promise<TokenPilotProductCommandResult> | TokenPilotProductCommandResult;
+  buildVisualPayload?(
+    currentConfig: Record<string, unknown>,
+  ): Promise<TokenPilotProductSurfacePayload> | TokenPilotProductSurfacePayload;
   handleVisual?(
     currentConfig: Record<string, unknown>,
   ): Promise<TokenPilotProductCommandResult> | TokenPilotProductCommandResult;

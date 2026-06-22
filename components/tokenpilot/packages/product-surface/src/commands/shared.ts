@@ -1,6 +1,7 @@
 import type {
   TokenPilotProductCommandContext,
   TokenPilotProductCommandResult,
+  TokenPilotProductSurfacePayload,
   TokenPilotProductSurfaceConfigAdapter,
   TokenPilotProductSurfaceHostBridge,
 } from "@tokenpilot/host-adapter";
@@ -15,6 +16,13 @@ export type ProductSurfaceCommandDeps = {
   bridge: TokenPilotProductSurfaceHostBridge;
   configAdapter: TokenPilotProductSurfaceConfigAdapter;
 };
+
+export function asTextResult(
+  text: string,
+  payload?: TokenPilotProductSurfacePayload,
+): TokenPilotProductCommandResult {
+  return payload ? { text, payload } : { text };
+}
 
 export async function writeUpdatedConfig(
   bridge: TokenPilotProductSurfaceHostBridge,

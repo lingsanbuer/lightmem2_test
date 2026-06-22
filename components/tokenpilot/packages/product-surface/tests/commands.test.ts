@@ -140,6 +140,41 @@ test("createProductSurfaceCommandHandler applies runtime mode and host defaults"
   assert.equal((pluginCfg.taskStateEstimator as Record<string, unknown>).enabled, true);
 });
 
+test("createProductSurfaceCommandHandler returns shared payload for built-only host features", async () => {
+  const config: Record<string, unknown> = {
+    pluginConfig: {},
+    pluginEntry: {},
+  };
+  const handler = createProductSurfaceCommandHandler({
+    bridge: {
+      loadConfig() {
+        return structuredClone(config);
+      },
+      async writeConfig(nextConfig) {
+        Object.assign(config, structuredClone(nextConfig));
+      },
+      buildDoctorPayload() {
+        return {
+          kind: "doctor",
+          data: {
+            ok: true,
+          },
+        };
+      },
+    },
+    configAdapter: createTestConfigAdapter(),
+  });
+
+  const result = await handler({ args: "doctor" });
+  assert.equal(result.text.includes("TokenPilot commands:"), true);
+  assert.deepEqual(result.payload, {
+    kind: "doctor",
+    data: {
+      ok: true,
+    },
+  });
+});
+
 test("createProductSurfaceCommandHandler updates reduction pass and settings details", async () => {
   const config: Record<string, unknown> = {
     pluginConfig: {},
