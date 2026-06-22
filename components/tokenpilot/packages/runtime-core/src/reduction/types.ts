@@ -1,11 +1,11 @@
 import type { ContextSegment, RuntimeTurnContext, RuntimeTurnResult } from "@tokenpilot/kernel";
 
 export type BuiltinReductionPassId =
+  | "read_state_compaction"
   | "tool_payload_trim"
   | "html_slimming"
   | "format_slimming"
   | "exec_output_truncation"
-  | "repeated_read_dedup"
   | "format_cleaning"
   | "path_truncation"
   | "image_downsample"

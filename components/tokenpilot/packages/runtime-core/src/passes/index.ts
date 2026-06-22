@@ -1,6 +1,6 @@
 // Reduction passes - atomic operations for content reduction
 
-export * from "./pass-repeated-read-dedup.js";
+export * from "./pass-read-state-compaction.js";
 export * from "./pass-tool-payload-trim.js";
 export * from "./pass-html-slimming.js";
 export * from "./pass-exec-output-truncation.js";

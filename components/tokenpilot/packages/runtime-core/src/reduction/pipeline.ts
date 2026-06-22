@@ -38,12 +38,12 @@ export function resolveReductionPasses(
 
   return [
     {
-      id: "repeated_read_dedup",
+      id: "read_state_compaction",
       phase: "before_call",
       target: "context_segment",
       options: {
         enabled: true,
-        ...(passOptions.repeated_read_dedup ?? {}),
+        ...(passOptions.read_state_compaction ?? {}),
       },
     },
     {

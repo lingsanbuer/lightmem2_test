@@ -2,7 +2,7 @@ import { formatSlimmingPass } from "../passes/pass-format-slimming.js";
 import { htmlSlimmingPass } from "../passes/pass-html-slimming.js";
 import { toolPayloadTrimPass } from "../passes/pass-tool-payload-trim.js";
 import { execOutputTruncationPass, execOutputTruncationBeforeCall } from "../passes/pass-exec-output-truncation.js";
-import { repeatedReadDedupPass } from "../passes/pass-repeated-read-dedup.js";
+import { readStateCompactionPass } from "../passes/pass-read-state-compaction.js";
 import { formatCleaningPass } from "../passes/pass-format-cleaning.js";
 import { pathTruncationPass } from "../passes/pass-path-truncation.js";
 import { imageDownsamplePass } from "../passes/pass-image-downsample.js";
@@ -16,11 +16,11 @@ import type {
 } from "./types.js";
 
 const BUILTIN_PASSES: Record<BuiltinReductionPassId, ReductionPassHandler> = {
+  read_state_compaction: readStateCompactionPass,
   tool_payload_trim: toolPayloadTrimPass,
   html_slimming: htmlSlimmingPass,
   format_slimming: formatSlimmingPass,
   exec_output_truncation: execOutputTruncationPass,
-  repeated_read_dedup: repeatedReadDedupPass,
   format_cleaning: formatCleaningPass,
   path_truncation: pathTruncationPass,
   image_downsample: imageDownsamplePass,

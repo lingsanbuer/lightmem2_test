@@ -58,7 +58,7 @@ export type TaskRouterConfig = {
  * Reduction strategy types for different compression approaches
  */
 export type ReductionStrategy =
-  | "repeated_read_dedup"      // Remove duplicate reads of same content/path
+  | "read_state_compaction"    // Compact stale or superseded reads of the same path
   | "exec_output_truncation"   // Truncate large exec/tool outputs
   | "tool_payload_trim"        // Trim tool payload fields
   | "html_slimming"            // Compress HTML content

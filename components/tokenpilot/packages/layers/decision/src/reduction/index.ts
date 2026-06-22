@@ -1,5 +1,5 @@
-// Reduction Analyzers - generate decisions for reduction module
-export * from "./repeated-read-analyzer.js";
+// Reduction analyzers - generate decisions for the reduction module.
+export * from "./read-state-compaction-analyzer.js";
 export * from "./tool-payload-analyzer.js";
 export * from "./format-slimming-analyzer.js";
 export * from "./exec-output-analyzer.js";

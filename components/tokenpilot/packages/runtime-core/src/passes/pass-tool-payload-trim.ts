@@ -5,22 +5,17 @@ import {
   buildArchiveLocation,
   buildRecoveryHint,
 } from "../archive-recovery/index.js";
+import {
+  reduceToolPayloadText,
+  type PayloadBlockConfig,
+  type ToolPayloadKind,
+  type ToolPayloadRouteConfig,
+} from "../reduction/tool-payload-router.js";
+import { classifyReadStates } from "../reduction/read-state-compaction.js";
 
 const DEFAULT_MAX_CHARS = 1200;
 const DEFAULT_HEAD_LINES = 8;
 const DEFAULT_TAIL_LINES = 8;
-
-type PayloadKind = "stdout" | "stderr" | "json" | "blob";
-
-type PayloadBlockConfig = {
-  enabled: boolean;
-  maxChars: number;
-  keepHeadLines: number;
-  keepTailLines: number;
-  maxPreviewChars: number;
-  maxItems: number;
-  maxDepth: number;
-};
 
 type ToolPayloadTrimConfig = {
   maxChars: number;
@@ -29,12 +24,6 @@ type ToolPayloadTrimConfig = {
   stderr: PayloadBlockConfig;
   json: PayloadBlockConfig;
   blob: PayloadBlockConfig;
-};
-
-type ParsedSection = {
-  kind: PayloadKind | "other";
-  headerLine?: string;
-  body: string;
 };
 
 const parsePositiveInt = (value: unknown, fallback: number): number =>
@@ -106,7 +95,7 @@ const resolveConfig = (options?: Record<string, unknown>): ToolPayloadTrimConfig
   };
 };
 
-const normalizePayloadKind = (value: unknown): PayloadKind | undefined => {
+const normalizePayloadKind = (value: unknown): ToolPayloadKind | undefined => {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().toLowerCase();
   if (
@@ -120,139 +109,48 @@ const normalizePayloadKind = (value: unknown): PayloadKind | undefined => {
   return undefined;
 };
 
-const clipText = (value: string, maxChars: number): string =>
-  value.length <= maxChars ? value : `${value.slice(0, maxChars)}...`;
-
-const summarizeLineBlock = (
-  text: string,
-  label: PayloadKind,
-  cfg: PayloadBlockConfig,
-): string => {
-  if (text.length <= cfg.maxChars) return text;
-
-  const lines = text.split("\n");
-  const head = lines.slice(0, cfg.keepHeadLines);
-  const tail = lines.slice(-cfg.keepTailLines);
-  const omittedLineCount = Math.max(0, lines.length - head.length - tail.length);
-  const summaryLine = `...[${label} reduced lines=${omittedLineCount} chars=${text.length}]`;
-  const nextLines = [...head];
-  if (omittedLineCount > 0 || text.length > cfg.maxChars) nextLines.push(summaryLine);
-  if (tail.length > 0) nextLines.push(...tail);
-  return nextLines.join("\n").trim();
-};
-
-const summarizeJsonValue = (
-  value: unknown,
-  depth: number,
-  maxDepth: number,
-  maxItems: number,
-  maxPreviewChars: number,
-): unknown => {
-  if (value == null || typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "string") return clipText(value, maxPreviewChars);
-  if (depth >= maxDepth) {
-    if (Array.isArray(value)) return `[array:${value.length}]`;
-    return "[object]";
-  }
-  if (Array.isArray(value)) {
-    return {
-      type: "array",
-      length: value.length,
-      preview: value
-        .slice(0, maxItems)
-        .map((item) => summarizeJsonValue(item, depth + 1, maxDepth, maxItems, maxPreviewChars)),
-    };
-  }
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    return {
-      type: "object",
-      keyCount: entries.length,
-      preview: Object.fromEntries(
-        entries
-          .slice(0, maxItems)
-          .map(([key, item]) => [
-            key,
-            summarizeJsonValue(item, depth + 1, maxDepth, maxItems, maxPreviewChars),
-          ]),
-      ),
-    };
-  }
-  return String(value);
-};
-
-const summarizeJsonText = (text: string, cfg: PayloadBlockConfig): string => {
-  try {
-    const parsed = JSON.parse(text);
-    const minified = JSON.stringify(parsed);
-    if (minified.length <= cfg.maxChars) {
-      return minified;
-    }
-    const summary = {
-      reduced: "json",
-      originalChars: text.length,
-      summary: summarizeJsonValue(parsed, 0, cfg.maxDepth, cfg.maxItems, cfg.maxPreviewChars),
-    };
-    return JSON.stringify(summary, null, 2);
-  } catch {
-    return summarizeLineBlock(text, "json", cfg);
-  }
-};
-
-const isLikelyBlob = (text: string): boolean => {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (/^data:[^;]+;base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed)) return true;
-  if (/^[A-Za-z0-9+/=\s]{512,}$/.test(trimmed.replace(/\n/g, ""))) return true;
-  if (/^[A-Fa-f0-9\s]{512,}$/.test(trimmed.replace(/\n/g, ""))) return true;
-  return false;
-};
-
-const summarizeBlobText = (text: string, cfg: PayloadBlockConfig): string => {
-  const trimmed = text.trim();
-  const preview = clipText(trimmed.replace(/\s+/g, ""), cfg.maxPreviewChars);
-  let blobKind = "blob";
-  if (trimmed.startsWith("data:")) blobKind = "data_url";
-  else if (/^[A-Za-z0-9+/=\s]+$/.test(trimmed)) blobKind = "base64";
-  else if (/^[A-Fa-f0-9\s]+$/.test(trimmed)) blobKind = "hex";
-
-  return `[${blobKind} reduced chars=${trimmed.length} preview=${preview}]`;
-};
-
-const getBlockConfig = (cfg: ToolPayloadTrimConfig, kind: PayloadKind): PayloadBlockConfig => {
-  if (kind === "stdout") return cfg.stdout;
-  if (kind === "stderr") return cfg.stderr;
-  if (kind === "json") return cfg.json;
-  return cfg.blob;
-};
-
-const reduceTextByKind = (
-  text: string,
-  kind: PayloadKind,
-  cfg: ToolPayloadTrimConfig,
-): { text: string; changed: boolean } => {
-  const blockCfg = getBlockConfig(cfg, kind);
-  if (!blockCfg.enabled) return { text, changed: false };
-
-  const nextText =
-    kind === "json"
-      ? summarizeJsonText(text, blockCfg)
-      : kind === "blob"
-        ? summarizeBlobText(text, blockCfg)
-        : summarizeLineBlock(text, kind, blockCfg);
-
-  return {
-    text: nextText,
-    changed: nextText !== text,
-  };
-};
-
 const reduceSegment = (
   segment: ContextSegment,
   cfg: ToolPayloadTrimConfig,
-  payloadKind: PayloadKind,
-): { text: string; changed: boolean } => {
-  return reduceTextByKind(segment.text, payloadKind, cfg);
+  payloadKind: ToolPayloadKind,
+  turnCtx: RuntimeTurnContext,
+  readStateBySegmentId: Map<string, "fresh" | "superseded" | "stale">,
+) => {
+  const meta = asObject(segment.metadata);
+  const toolPayload = asObject(meta?.toolPayload);
+  const fieldName =
+    typeof meta?.fieldName === "string"
+      ? meta.fieldName
+      : typeof toolPayload?.fieldName === "string"
+        ? toolPayload.fieldName as string
+        : undefined;
+  const path =
+    typeof meta?.path === "string"
+      ? meta.path
+      : typeof toolPayload?.path === "string"
+        ? toolPayload.path as string
+        : undefined;
+
+  return reduceToolPayloadText(
+    segment.text,
+    payloadKind,
+    cfg satisfies ToolPayloadRouteConfig,
+    {
+      toolName: extractToolName(segment),
+      fieldName,
+      path,
+      payloadKind,
+      readState: readStateBySegmentId.get(segment.id),
+    },
+    {
+      queryText:
+        typeof turnCtx.metadata?.latestUserQuery === "string"
+          ? turnCtx.metadata.latestUserQuery
+          : typeof turnCtx.metadata?.currentQuery === "string"
+            ? turnCtx.metadata.currentQuery
+            : undefined,
+    },
+  );
 };
 
 const asObject = (value: unknown): Record<string, unknown> | undefined =>
@@ -319,9 +217,9 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
     }
 
     // Build a set of segment IDs to trim with their payload kinds
-    const segmentMap = new Map<string, { segment: ContextSegment; payloadKind: PayloadKind }>();
+    const segmentMap = new Map<string, { segment: ContextSegment; payloadKind: ToolPayloadKind }>();
     for (const instr of toolPayloadInstructions) {
-      const payloadKind = (instr.parameters?.payloadKind as PayloadKind) ?? "stdout";
+      const payloadKind = (instr.parameters?.payloadKind as ToolPayloadKind) ?? "stdout";
       for (const id of instr.segmentIds) {
         const segment = turnCtx.segments.find((s) => s.id === id);
         if (segment) {
@@ -339,7 +237,9 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
 
     // Perform trimming
     const touchedSegmentIds: string[] = [];
-    const reducedKinds = new Set<PayloadKind>();
+    const reducedKinds = new Set<ToolPayloadKind>();
+    const reducedRoutes = new Set<string>();
+    const readStateBySegmentId = classifyReadStates(turnCtx.segments);
 
     const workspaceDir =
       typeof turnCtx.metadata?.workspaceDir === "string"
@@ -351,7 +251,13 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
       const entry = segmentMap.get(segment.id);
       if (!entry) return segment;
 
-      const reduced = reduceSegment(segment, cfg, entry.payloadKind);
+      const reduced = reduceSegment(
+        segment,
+        cfg,
+        entry.payloadKind,
+        turnCtx,
+        readStateBySegmentId,
+      );
       if (!reduced.changed) return segment;
 
       const dataKey = extractDataKey(segment);
@@ -384,12 +290,16 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
         workspaceDir,
         metadata: {
           payloadKind: entry.payloadKind,
+          contentRoute: reduced.route,
+          contentRouteReason: reduced.reason,
           reducedPreviewChars: reduced.text.length,
+          readState: readStateBySegmentId.get(segment.id),
         },
       });
 
       touchedSegmentIds.push(segment.id);
       reducedKinds.add(entry.payloadKind);
+      reducedRoutes.add(reduced.route);
       archivePaths.push(archivePath);
 
       return {
@@ -402,10 +312,13 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
             toolPayloadTrim: {
               reduced: true,
               payloadKind: entry.payloadKind,
+              contentRoute: reduced.route,
+              contentRouteReason: reduced.reason,
               dataKey,
               originalSize: segment.text.length,
               reducedSize: reduced.text.length,
               archivePath,
+              readState: readStateBySegmentId.get(segment.id),
             },
           },
         },
@@ -425,10 +338,11 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
         ...turnCtx,
         segments: nextSegments,
       },
-      note: `${cfg.noteLabel}:${[...reducedKinds].join(",") || "mixed"}`,
+      note: `${cfg.noteLabel}:${[...reducedKinds].join(",") || "mixed"}:${[...reducedRoutes].join(",") || "plain_text"}`,
       touchedSegmentIds,
       metadata: {
         reducedKinds: [...reducedKinds],
+        reducedRoutes: [...reducedRoutes],
         archivePaths,
       },
     };

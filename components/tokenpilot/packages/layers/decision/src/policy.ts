@@ -17,7 +17,7 @@ import {
   type PolicyLocalitySignal,
 } from "./locality.js";
 import {
-  analyzeRepeatedReads,
+  analyzeReadStateCompaction,
   analyzeToolPayloadTrim,
   analyzeFormatSlimming,
   analyzeExecOutputTruncation,
@@ -950,7 +950,7 @@ function analyzePolicyBeforeBuild(
   state.cacheHealth.mode = cacheHealthMode;
 
   // Analyze segments for reduction opportunities
-  const repeatedReadDecision = analyzeRepeatedReads(ctx.segments);
+  const readStateCompactionDecision = analyzeReadStateCompaction(ctx.segments);
   const toolPayloadDecision = analyzeToolPayloadTrim(ctx.segments);
   const formatSlimmingDecision = analyzeFormatSlimming(ctx.segments);
   const execOutputDecision = analyzeExecOutputTruncation(ctx.segments);
@@ -1067,11 +1067,11 @@ function analyzePolicyBeforeBuild(
   }
   if (
     config.reductionEnabled &&
-    repeatedReadDecision.instructions.length > 0 &&
-    repeatedReadDecision.estimatedSavedChars > 0
+    readStateCompactionDecision.instructions.length > 0 &&
+    readStateCompactionDecision.estimatedSavedChars > 0
   ) {
-    reductionReasons.push(`repeated_reads_detected(count=${repeatedReadDecision.instructions.length},saved=${repeatedReadDecision.estimatedSavedChars})`);
-    reductionBeforeCallPassIds.push("repeated_read_dedup");
+    reductionReasons.push(`read_state_compaction_detected(count=${readStateCompactionDecision.instructions.length},saved=${readStateCompactionDecision.estimatedSavedChars})`);
+    reductionBeforeCallPassIds.push("read_state_compaction");
   }
   if (
     config.reductionEnabled &&
@@ -1131,7 +1131,7 @@ function analyzePolicyBeforeBuild(
   }
 
   const allReductionInstructions: ReductionInstruction[] = [
-    ...repeatedReadDecision.instructions,
+    ...readStateCompactionDecision.instructions,
     ...toolPayloadDecision.instructions,
     ...formatSlimmingDecision.instructions,
     ...execOutputDecision.instructions,

@@ -1,5 +1,5 @@
 export type ReductionPassToggles = {
-  repeatedReadDedup?: boolean;
+  readStateCompaction?: boolean;
   toolPayloadTrim?: boolean;
   htmlSlimming?: boolean;
   execOutputTruncation?: boolean;
@@ -17,8 +17,8 @@ export function isReductionPassEnabled(
 ): boolean {
   if (!passToggles) return true;
   switch (passId) {
-    case "repeated_read_dedup":
-      return passToggles.repeatedReadDedup ?? true;
+    case "read_state_compaction":
+      return passToggles.readStateCompaction ?? true;
     case "tool_payload_trim":
       return passToggles.toolPayloadTrim ?? true;
     case "html_slimming":
