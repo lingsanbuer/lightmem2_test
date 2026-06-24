@@ -50,7 +50,7 @@ Or use the standalone CLI:
 
 ```bash
 cd /path/to/LightMem2
-./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
+lightmem2 openclaw doctor
 ```
 
 Development-style install should use source build + runtime sync instead of

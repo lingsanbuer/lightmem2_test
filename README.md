@@ -84,6 +84,7 @@ pnpm install
 pnpm build
 pnpm component:install:tokenpilot:openclaw
 pnpm lightmem2:build
+pnpm lightmem2:install
 ```
 
 The installer will:
@@ -96,10 +97,16 @@ The installer will:
 - apply the default `normal` runtime mode
 - try to restart the OpenClaw gateway automatically
 
-The standalone CLI entrypoint is built at:
+The standalone CLI entrypoint is built from:
 
 ```text
 components/tokenpilot/products/cli/dist/cli.js
+```
+
+The install step creates:
+
+```text
+~/.local/bin/lightmem2
 ```
 
 <span id='quickstart'/>
@@ -161,11 +168,11 @@ and eviction snapshots.
 If your current host does not expose internal slash commands, use the standalone CLI:
 
 ```bash
-./components/tokenpilot/products/cli/dist/cli.js openclaw status
-./components/tokenpilot/products/cli/dist/cli.js openclaw report
-./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
-./components/tokenpilot/products/cli/dist/cli.js openclaw visual
-./components/tokenpilot/products/cli/dist/cli.js openclaw mode normal
+lightmem2 openclaw status
+lightmem2 openclaw report
+lightmem2 openclaw doctor
+lightmem2 openclaw visual
+lightmem2 openclaw mode normal
 ```
 
 ### 3. Run the Built-In Smoke Test

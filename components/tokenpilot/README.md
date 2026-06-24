@@ -106,11 +106,11 @@ Current implementation status:
 Standalone CLI equivalents:
 
 ```bash
-./components/tokenpilot/products/cli/dist/cli.js openclaw status
-./components/tokenpilot/products/cli/dist/cli.js openclaw report
-./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
-./components/tokenpilot/products/cli/dist/cli.js openclaw visual
-./components/tokenpilot/products/cli/dist/cli.js openclaw mode normal
+lightmem2 openclaw status
+lightmem2 openclaw report
+lightmem2 openclaw doctor
+lightmem2 openclaw visual
+lightmem2 openclaw mode normal
 ```
 
 ### Stabilizer

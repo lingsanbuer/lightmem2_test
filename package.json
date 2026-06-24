@@ -7,6 +7,7 @@
         "build": "pnpm -r build",
         "typecheck": "pnpm -r typecheck",
         "lightmem2:build": "npm --prefix components/tokenpilot/products/cli run build",
+        "lightmem2:install": "npm --prefix components/tokenpilot/products/cli run install:bin",
         "lightmem2:typecheck": "npm --prefix components/tokenpilot/products/cli run typecheck",
         "lightmem2:test": "npm --prefix components/tokenpilot/products/cli test",
         "component:pack:tokenpilot:openclaw": "npm --prefix components/tokenpilot/adapters/openclaw run pack:release",
