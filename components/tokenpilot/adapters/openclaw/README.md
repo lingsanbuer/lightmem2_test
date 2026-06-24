@@ -46,6 +46,13 @@ Inside an active TokenPilot session, the equivalent self-check is:
 /tokenpilot doctor
 ```
 
+Or use the standalone CLI:
+
+```bash
+cd /path/to/LightMem2
+./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
+```
+
 Development-style install should use source build + runtime sync instead of
 mixing release and load-path installs. The current sanity workflow is:
 

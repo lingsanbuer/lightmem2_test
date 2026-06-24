@@ -29,6 +29,7 @@ Use this component README when you need TokenPilot-specific details:
 - runtime state layout
 - debugging notes
 - host integration boundary
+- standalone CLI usage
 
 For compatibility, the current OpenClaw adapter also accepts the `lightmem2`
 command and model namespace aliases in addition to the established
@@ -45,6 +46,8 @@ In the current public repo:
   - shared runtime engine, contracts, and stateful layers
 - `adapters/openclaw/`
   - the current production host adapter for OpenClaw
+- `products/cli/`
+  - standalone `lightmem2` CLI surface for hosts without native slash commands
 
 Adapter development notes live in:
 
@@ -58,6 +61,8 @@ This is the intended reuse boundary for future hosts such as Codex CLI or Claude
 components/tokenpilot/
 ├── adapters/
 │   └── openclaw/         # OpenClaw adapter, hooks, commands, embedded proxy
+├── products/
+│   └── cli/              # Standalone lightmem2 CLI surface
 ├── README.md
 └── packages/
     ├── host-adapter/     # Shared host contracts and host-specific path/state interfaces
@@ -96,6 +101,16 @@ Current implementation status:
 /tokenpilot doctor
 /tokenpilot mode normal
 /tokenpilot help
+```
+
+Standalone CLI equivalents:
+
+```bash
+./components/tokenpilot/products/cli/dist/cli.js openclaw status
+./components/tokenpilot/products/cli/dist/cli.js openclaw report
+./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
+./components/tokenpilot/products/cli/dist/cli.js openclaw visual
+./components/tokenpilot/products/cli/dist/cli.js openclaw mode normal
 ```
 
 ### Stabilizer

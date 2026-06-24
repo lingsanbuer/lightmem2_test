@@ -37,6 +37,7 @@ Keep these responsibilities in shared packages:
 - state and policy logic in `packages/layers/*`
 - host abstraction helpers in `packages/host-adapter/`
 - shared command semantics in `packages/product-surface/`
+- standalone product entrypoints in `products/`
 
 ## Recommended Adapter Shape
 

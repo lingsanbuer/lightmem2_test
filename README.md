@@ -83,6 +83,7 @@ corepack enable
 pnpm install
 pnpm build
 pnpm component:install:tokenpilot:openclaw
+pnpm lightmem2:build
 ```
 
 The installer will:
@@ -94,6 +95,12 @@ The installer will:
 - switch `plugins.slots.contextEngine` to `layered-context`
 - apply the default `normal` runtime mode
 - try to restart the OpenClaw gateway automatically
+
+The standalone CLI entrypoint is built at:
+
+```text
+components/tokenpilot/products/cli/dist/cli.js
+```
 
 <span id='quickstart'/>
 
@@ -151,6 +158,16 @@ OpenClaw adapter surface.
 and eviction snapshots.
 `/lightmem2 mode <conservative|normal|aggressive>` switches preset runtime behavior.
 
+If your current host does not expose internal slash commands, use the standalone CLI:
+
+```bash
+./components/tokenpilot/products/cli/dist/cli.js openclaw status
+./components/tokenpilot/products/cli/dist/cli.js openclaw report
+./components/tokenpilot/products/cli/dist/cli.js openclaw doctor
+./components/tokenpilot/products/cli/dist/cli.js openclaw visual
+./components/tokenpilot/products/cli/dist/cli.js openclaw mode normal
+```
+
 ### 3. Run the Built-In Smoke Test
 
 ```bash
@@ -184,6 +201,7 @@ Once the basic runtime path is working, use these component-level docs:
 
 - [components/README.md](./components/README.md) for the framework-level component index
 - [components/tokenpilot/README.md](./components/tokenpilot/README.md) for TokenPilot commands, configuration, runtime state, and debugging
+- [components/tokenpilot/products/cli/package.json](./components/tokenpilot/products/cli/package.json) for the standalone `lightmem2` CLI package
 - [experiments/README.md](./experiments/README.md) for top-level benchmark reproduction entrypoints
 - [experiments/tokenpilot/README.md](./experiments/tokenpilot/README.md) for the current TokenPilot benchmark hub
 

@@ -4,8 +4,9 @@ import { readVisualSessionData, readVisualSessionList } from "./session-visual-d
 import { renderVisualPageHtml, renderVisualPageScript } from "./session-visual-page.js";
 
 export type VisualStateDirResolver = (config: Record<string, unknown>) => string | undefined;
+export type VisualServerHandle = { stateDir: string; server: Server; url: string };
 
-let visualServerState: { stateDir: string; server: Server; url: string } | null = null;
+let visualServerState: VisualServerHandle | null = null;
 
 function sendJson(res: any, statusCode: number, payload: unknown): void {
   res.statusCode = statusCode;
@@ -25,10 +26,17 @@ function sendJs(res: any, script: string): void {
   res.end(script);
 }
 
-async function createVisualServer(stateDir: string): Promise<{ stateDir: string; server: Server; url: string }> {
+export async function startVisualServer(
+  stateDir: string,
+  options?: { unref?: boolean },
+): Promise<VisualServerHandle> {
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      if (url.pathname === "/health") {
+        sendJson(res, 200, { ok: true, stateDir });
+        return;
+      }
       if (url.pathname === "/") {
         sendHtml(res, renderVisualPageHtml());
         return;
@@ -65,6 +73,7 @@ async function createVisualServer(stateDir: string): Promise<{ stateDir: string;
       resolve();
     });
   });
+  if (options?.unref) server.unref();
 
   const address = server.address();
   if (!address || typeof address === "string") {
@@ -73,19 +82,19 @@ async function createVisualServer(stateDir: string): Promise<{ stateDir: string;
 
   return {
     stateDir,
-    server,
-    url: `http://127.0.0.1:${address.port}`,
+      server,
+      url: `http://127.0.0.1:${address.port}`,
   };
 }
 
-async function ensureVisualServer(stateDir: string): Promise<{ stateDir: string; server: Server; url: string }> {
+async function ensureVisualServer(stateDir: string): Promise<VisualServerHandle> {
   if (visualServerState?.stateDir === stateDir) return visualServerState;
   if (visualServerState) {
     await new Promise<void>((resolve) => {
       visualServerState?.server.close(() => resolve());
     });
   }
-  visualServerState = await createVisualServer(stateDir);
+  visualServerState = await startVisualServer(stateDir, { unref: false });
   return visualServerState;
 }
 
