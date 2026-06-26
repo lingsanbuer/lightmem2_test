@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Framework-LightMem2-black" alt="framework">
-  <img src="https://img.shields.io/badge/Runtime-OpenClaw-green" alt="runtime">
+  <img src="https://img.shields.io/badge/Hosts-OpenClaw%20%7C%20Codex-green" alt="hosts">
   <img src="https://img.shields.io/badge/Component-TokenPilot-blue" alt="component">
   <img src="https://img.shields.io/badge/Package%20Manager-pnpm-informational" alt="pnpm">
   <img src="https://img.shields.io/badge/License-MIT-brightgreen" alt="license">
@@ -68,26 +68,32 @@
 
 ### Installation Steps
 
-If your OpenClaw home or config path is not under the default `~/.openclaw`, you can override it with:
+Clone the repository and build the shared packages first:
 
-```bash
-export LIGHTMEM2_OPENCLAW_HOME="/path/to/openclaw-home"
-export OPENCLAW_CONFIG_PATH="/path/to/openclaw.json"
-```
-
-Then, clone this repository and run the installer script:
 ```bash
 git clone https://github.com/zjunlp/LightMem2.git
 cd LightMem2
 corepack enable
 pnpm install
 pnpm build
-pnpm component:install:tokenpilot:openclaw
 pnpm lightmem2:build
 pnpm lightmem2:install
 ```
 
-The installer will:
+### OpenClaw
+
+If your OpenClaw home or config path is not under the default `~/.openclaw`, you can override it with:
+
+```bash
+export LIGHTMEM2_OPENCLAW_HOME="/path/to/openclaw-home"
+export OPENCLAW_CONFIG_PATH="/path/to/openclaw.json"
+```
+Then just run the OpenClaw adapter install command:
+```bash
+pnpm component:install:tokenpilot:openclaw
+```
+
+The OpenClaw installer will:
 
 - package the current TokenPilot OpenClaw adapter
 - install it into `~/.openclaw/extensions/tokenpilot`
@@ -96,6 +102,31 @@ The installer will:
 - switch `plugins.slots.contextEngine` to `layered-context`
 - apply the default `normal` runtime mode
 - try to restart the OpenClaw gateway automatically
+
+### Codex CLI
+
+If your Codex config files are not under the default `~/.codex`, you can override them with:
+
+```bash
+export CODEX_CONFIG_PATH="/path/to/config.toml"
+export CODEX_HOOKS_CONFIG_PATH="/path/to/hooks.json"
+export TOKENPILOT_CODEX_CONFIG="/path/to/tokenpilot.json"
+```
+
+Then build and install the Codex adapter:
+
+```bash
+npm --prefix components/tokenpilot/adapters/codex run build
+npm --prefix components/tokenpilot/adapters/codex run install:codex
+```
+
+The Codex installer will:
+
+- add a TokenPilot model provider entry to Codex config
+- switch the default `model_provider` to that local TokenPilot provider
+- write TokenPilot runtime config to `~/.codex/tokenpilot.json`
+- register Codex hooks in `~/.codex/hooks.json`
+- configure the local proxy base URL served by `tokenpilot-codex`
 
 The standalone CLI entrypoint is built from:
 
@@ -131,7 +162,7 @@ For the current LightMem2 runtime path, use a `lightmem2/...` model instead of y
 
 ### 2. Verify It in a Real Session
 
-The simplest manual verification flow is:
+#### OpenClaw
 
 1. Start or restart OpenClaw.
 2. Open a session with a `lightmem2/<model>` model.
@@ -175,6 +206,36 @@ lightmem2 openclaw visual
 lightmem2 openclaw mode normal
 ```
 
+#### Codex CLI
+
+The current Codex path uses the standalone CLI plus Codex hooks.
+
+1. Run the Codex install flow shown above.
+2. Start Codex normally.
+3. In another terminal, verify the adapter:
+
+```bash
+lightmem2 codex status
+lightmem2 codex doctor
+lightmem2 codex mode normal
+lightmem2 codex reduction status
+lightmem2 codex stabilizer target user
+```
+
+For daemon-level inspection, you can also run:
+
+```bash
+tokenpilot-codex status
+tokenpilot-codex start
+```
+
+Codex currently supports `mode conservative` and `mode normal`.
+`mode aggressive` is not available on the current Codex adapter.
+
+For the full Codex adapter notes, see:
+
+- [components/tokenpilot/adapters/codex/README.md](./components/tokenpilot/adapters/codex/README.md)
+
 ### 3. Run the Built-In Smoke Test
 
 ```bash
@@ -208,6 +269,7 @@ Once the basic runtime path is working, use these component-level docs:
 
 - [components/README.md](./components/README.md) for the framework-level component index
 - [components/tokenpilot/README.md](./components/tokenpilot/README.md) for TokenPilot commands, configuration, runtime state, and debugging
+- [components/tokenpilot/adapters/codex/README.md](./components/tokenpilot/adapters/codex/README.md) for Codex-specific install, command scope, and proxy runtime notes
 - [components/tokenpilot/products/cli/package.json](./components/tokenpilot/products/cli/package.json) for the standalone `lightmem2` CLI package
 - [experiments/README.md](./experiments/README.md) for top-level benchmark reproduction entrypoints
 - [experiments/tokenpilot/README.md](./experiments/tokenpilot/README.md) for the current TokenPilot benchmark hub
@@ -269,7 +331,8 @@ LightMem2/
 ├── components/
 │   └── tokenpilot/
 │       ├── adapters/
-│       │   └── openclaw/         # current production host adapter for OpenClaw
+│       │   ├── openclaw/         # production host adapter for OpenClaw
+│       │   └── codex/            # Codex CLI adapter with hooks + local proxy
 │       └── packages/
 │           ├── host-adapter/     # Shared host-adapter contracts and path-resolution interfaces
 │           ├── runtime-core/     # Host-agnostic runtime engine and shared execution logic
@@ -433,41 +496,20 @@ Claw-Eval abbreviations: Wkfl=Workflow, Ops=Ops, Fin=Finance, Off=Office QA, Com
 
 ## ⚙️ Configuration
 
-For the current public runtime path, LightMem2 is configured through the
-OpenClaw plugin entry in:
+The exact config file and install surface depend on the host adapter:
 
-```text
-~/.openclaw/openclaw.json
-```
-
-At the moment, the runtime component is still mounted under the `tokenpilot`
-plugin entry:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "tokenpilot": {
-        "enabled": true,
-        "config": {
-          "...": "..."
-        }
-      }
-    }
-  }
-}
-```
+- OpenClaw: `~/.openclaw/openclaw.json`
+- Codex CLI: `~/.codex/tokenpilot.json`
 
 ### Default Runtime Mode
 
-The current install path applies `normal` mode by default and sets
-`plugins.slots.contextEngine` to `layered-context`.
+The current install path applies `normal` mode by default.
 
 - `conservative`: stabilizer on, lighter reduction preset, eviction off
 - `normal`: stabilizer on, balanced reduction preset, eviction off
 - `aggressive`: stabilizer on, aggressive reduction preset, eviction on with task-state estimator on
 
-You can switch modes in-session with:
+You can switch modes with the host command surface:
 
 ```text
 /lightmem2 mode conservative
@@ -475,38 +517,12 @@ You can switch modes in-session with:
 /lightmem2 mode aggressive
 ```
 
-### Minimal Runtime Config
+For Codex, use:
 
-```json
-{
-  "plugins": {
-    "entries": {
-      "tokenpilot": {
-        "enabled": true,
-        "config": {
-          "enabled": true,
-          "proxyBaseUrl": "https://your-openai-compatible-endpoint/v1",
-          "proxyApiKey": "your_api_key",
-          "modules": {
-            "stabilizer": true,
-            "reduction": true,
-            "eviction": false
-          }
-        }
-      }
-    }
-  }
-}
+```bash
+lightmem2 codex mode conservative
+lightmem2 codex mode normal
 ```
-
-For a first successful run, only these fields matter:
-
-- `enabled`
-- `proxyBaseUrl`
-- `proxyApiKey`
-- `modules.stabilizer`
-- `modules.reduction`
-- `modules.eviction`
 
 Recommended starting behavior:
 
@@ -514,38 +530,30 @@ Recommended starting behavior:
 - keep `reduction` enabled
 - leave `eviction` off until the basic runtime path is already working
 
-If you do not want to hardcode provider credentials in `openclaw.json`, you can
-also supply them through environment variables before starting OpenClaw:
-
-```bash
-export LIGHTMEM2_API_KEY="your_api_key"
-export LIGHTMEM2_BASE_URL="https://your-openai-compatible-endpoint/v1"
-```
-
-If your OpenClaw home or config path is not under the default location, you can
-also override:
-
-```bash
-export LIGHTMEM2_OPENCLAW_HOME="/path/to/openclaw-home"
-export OPENCLAW_CONFIG_PATH="/path/to/openclaw.json"
-```
-
-
 Advanced estimator options, reduction-pass tuning, memory settings, runtime
 state layout, and debugging details are intentionally kept out of the root
 README.
 
-For the full component-level configuration reference, see:
+For full host-specific configuration, see:
 
 - [components/tokenpilot/README.md](./components/tokenpilot/README.md)
+- [components/tokenpilot/adapters/openclaw/README.md](./components/tokenpilot/adapters/openclaw/README.md)
+- [components/tokenpilot/adapters/codex/README.md](./components/tokenpilot/adapters/codex/README.md)
 
-<span id='configuration'/>
+<span id='citation'/>
 
 ## 📄 Citation
 
 Please cite our paper if you use LightMem2 in your work.
 
 ```bibtex
+@article{xu2026tokenpilot,
+  title={TokenPilot: Cache-Efficient Context Management for LLM Agents},
+  author={Xu, Buqiang and Xue, Zirui and Chen, Dianmou and Fu, Chenyang and Wu, Chiyu and Huang, Caiying and Jiang, Chen and Fang, Jizhan and Deng, Xinle and Chen, Yijun and others},
+  journal={arXiv preprint arXiv:2606.17016},
+  year={2026}
+}
+
 @inproceedings{fang2025lightmem,
   title={LightMem: Lightweight and Efficient Memory-Augmented Generation},
   author={Jizhan Fang and Xinle Deng and Haoming Xu and Ziyan Jiang and Yuqi Tang and Ziwen Xu and Shumin Deng and Yunzhi Yao and Mengru Wang and Shuofei Qiao and Huajun Chen and Ningyu Zhang},
@@ -554,12 +562,6 @@ Please cite our paper if you use LightMem2 in your work.
   url={https://openreview.net/forum?id=dyJ0GWpjJB}
 }
 
-@article{xu2026tokenpilot,
-  title={TokenPilot: Cache-Efficient Context Management for LLM Agents},
-  author={Xu, Buqiang and Xue, Zirui and Chen, Dianmou and Fu, Chenyang and Wu, Chiyu and Huang, Caiying and Jiang, Chen and Fang, Jizhan and Deng, Xinle and Chen, Yijun and others},
-  journal={arXiv preprint arXiv:2606.17016},
-  year={2026}
-}
 ```
 
 ## 🎉Contributors

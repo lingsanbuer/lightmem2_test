@@ -46,6 +46,8 @@ In the current public repo:
   - shared runtime engine, contracts, and stateful layers
 - `adapters/openclaw/`
   - the current production host adapter for OpenClaw
+- `adapters/codex/`
+  - Codex CLI adapter with hook-based integration and local Responses proxy
 - `products/cli/`
   - standalone `lightmem2` CLI surface for hosts without native slash commands
 
@@ -60,7 +62,8 @@ This is the intended reuse boundary for future hosts such as Codex CLI or Claude
 ```text
 components/tokenpilot/
 ├── adapters/
-│   └── openclaw/         # OpenClaw adapter, hooks, commands, embedded proxy
+│   ├── openclaw/         # OpenClaw adapter, hooks, commands, embedded proxy
+│   └── codex/            # Codex CLI adapter, hooks, provider install, local proxy
 ├── products/
 │   └── cli/              # Standalone lightmem2 CLI surface
 ├── README.md
@@ -88,7 +91,7 @@ Current host integration index:
 Current implementation status:
 
 - `OpenClaw`: production adapter
-- `Codex CLI`: planned
+- `Codex CLI`: available through the standalone CLI + Codex hook adapter
 - `Claude Code`: planned
 
 ## Runtime Commands
@@ -111,6 +114,17 @@ lightmem2 openclaw report
 lightmem2 openclaw doctor
 lightmem2 openclaw visual
 lightmem2 openclaw mode normal
+```
+
+Current Codex CLI equivalents:
+
+```bash
+lightmem2 codex status
+lightmem2 codex report
+lightmem2 codex doctor
+lightmem2 codex mode normal
+lightmem2 codex reduction status
+lightmem2 codex stabilizer target user
 ```
 
 ### Stabilizer
@@ -143,6 +157,7 @@ Recommended default behavior:
 - default install mode is `normal`
 - keep `stabilizer` enabled in all modes
 - enable `eviction` mainly for longer continuous-session workloads
+- on Codex, use `conservative` or `normal`; `aggressive` is intentionally unavailable
 
 ### Runtime Modes
 
@@ -160,12 +175,23 @@ Commands:
 /tokenpilot mode aggressive
 ```
 
+Codex currently supports only:
+
+- `lightmem2 codex mode conservative`
+- `lightmem2 codex mode normal`
+
 ## Configuration
 
 TokenPilot is configured through your OpenClaw plugin entry, typically in:
 
 ```text
 ~/.openclaw/openclaw.json
+```
+
+The Codex adapter uses a separate runtime config file, typically:
+
+```text
+~/.codex/tokenpilot.json
 ```
 
 Minimal shape:

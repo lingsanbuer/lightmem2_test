@@ -8,7 +8,7 @@ The current public repository ships one production adapter:
 | Host | Status | Integration Mode | Install Surface | Main Adapter Docs |
 | :-- | :-- | :-- | :-- | :-- |
 | `OpenClaw` | public | bundled runtime plugin | `pnpm component:install:tokenpilot:openclaw` or `npm --prefix components/tokenpilot/adapters/openclaw run install:release` | [adapters/openclaw/README.md](./adapters/openclaw/README.md) |
-| `Codex CLI` | planned | external hook / adapter | todo | not implemented yet |
+| `Codex CLI` | public preview | external hook / adapter + local Responses proxy | `npm --prefix components/tokenpilot/adapters/codex run build` then `npm --prefix components/tokenpilot/adapters/codex run install:codex` | [adapters/codex/README.md](./adapters/codex/README.md) |
 | `Claude Code` | planned | external hook / adapter | todo | not implemented yet |
 
 ## Current Boundary
@@ -38,9 +38,11 @@ General adapter development guidance lives in:
 
 - [adapters/README.md](./adapters/README.md)
 
-At the moment, OpenClaw is the only fully implemented adapter. Some OpenClaw
-assumptions are still being pushed out of shared packages and into the adapter
-boundary.
+At the moment:
+
+- OpenClaw is the main production adapter
+- Codex CLI is available as a narrower public-preview adapter
+- some OpenClaw assumptions are still being pushed out of shared packages and into the adapter boundary
 
 ## Adapter Checklist
 

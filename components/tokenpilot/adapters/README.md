@@ -13,8 +13,9 @@ Current adapter inventory:
 
 - `openclaw/`
   - production adapter
+- `codex/`
+  - public-preview adapter for Codex CLI
 - future adapters
-  - `codex`
   - `claude-code`
   - other host-specific integrations
 
@@ -115,3 +116,4 @@ spot.
 - [../README.md](../README.md)
 - [../HOSTS.md](../HOSTS.md)
 - [openclaw/README.md](./openclaw/README.md)
+- [codex/README.md](./codex/README.md)
