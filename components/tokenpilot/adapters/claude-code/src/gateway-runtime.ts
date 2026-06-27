@@ -3,11 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Server } from "node:http";
 import { mkdir } from "node:fs/promises";
 import {
+  createStaticStatePathResolver,
   prepareBeforeCall,
   createSseJsonStreamObserver,
   type HostGatewayForwarder,
   type HostGatewayStreamObserver,
 } from "@tokenpilot/host-adapter";
+import { configureStatePathResolver } from "@tokenpilot/runtime-core";
 import type { TokenPilotClaudeCodeConfig } from "./config.js";
 import { proxyBaseUrlForPort } from "./config.js";
 import type { TokenPilotClaudeCodeLogger } from "./logger.js";
@@ -134,6 +136,13 @@ export async function startClaudeCodeGatewayRuntime(params: {
   if (!config.enabled) {
     throw new Error("TokenPilot Claude Code adapter is disabled by config");
   }
+
+  configureStatePathResolver(createStaticStatePathResolver({
+    hostId: "claude-code",
+    displayName: "Claude Code",
+    stateDir: config.stateDir,
+    namespaceDir: "tokenpilot",
+  }));
 
   await mkdir(config.stateDir, { recursive: true });
   const upstream = resolveClaudeCodeUpstream(config);
