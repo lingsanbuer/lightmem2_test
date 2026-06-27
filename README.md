@@ -61,6 +61,7 @@
 
 ## 📢 News
 
+- **[2026-06-28]**: 🧩 TokenPilot now supports Codex and Claude Code.
 - **[2026-06-16]**: 🚀 **[TokenPilot: Cache-Efficient Context Management for LLM Agents](https://arxiv.org/abs/2606.17016)** is released.
 <span id='installation'/>
 
