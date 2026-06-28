@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export type ClaudeCodeSessionSnapshot = {
@@ -64,9 +65,14 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 
 async function writeJsonFileAtomic(path: string, payload: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp`;
+  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(tempPath, path);
+  try {
+    await rename(tempPath, path);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function appendJsonl(path: string, payload: unknown): Promise<void> {
