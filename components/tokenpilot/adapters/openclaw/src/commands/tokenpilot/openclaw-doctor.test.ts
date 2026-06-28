@@ -50,7 +50,7 @@ test("inspectOpenClawDoctor passes when release install invariants are present",
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(configPath, "{}\n", "utf8");
 
-  process.env.LIGHTMEM2_OPENCLAW_HOME = root;
+  process.env.OPENCLAW_STATE_DIR = join(root, ".openclaw");
   process.env.OPENCLAW_CONFIG_PATH = configPath;
 
   try {
@@ -60,7 +60,7 @@ test("inspectOpenClawDoctor passes when release install invariants are present",
     assert.match(formatOpenClawDoctorReport(report), /plugins\.slots\.contextEngine: layered-context/);
     assert.doesNotMatch(formatOpenClawDoctorReport(report), /Suggested fixes:/);
   } finally {
-    delete process.env.LIGHTMEM2_OPENCLAW_HOME;
+    delete process.env.OPENCLAW_STATE_DIR;
     delete process.env.OPENCLAW_CONFIG_PATH;
     rmSync(root, { recursive: true, force: true });
   }
@@ -73,7 +73,7 @@ test("inspectOpenClawDoctor reports config drift with targeted fixes", async () 
   mkdirSync(stateRoot, { recursive: true });
   writeFileSync(configPath, "{}\n", "utf8");
 
-  process.env.LIGHTMEM2_OPENCLAW_HOME = root;
+  process.env.OPENCLAW_STATE_DIR = stateRoot;
   process.env.OPENCLAW_CONFIG_PATH = configPath;
 
   try {
@@ -114,7 +114,7 @@ test("inspectOpenClawDoctor reports config drift with targeted fixes", async () 
     assert.match(rendered, /repair the `plugins\.entries\.tokenpilot`, `plugins\.allow`, and `plugins\.slots\.contextEngine` sections/);
     assert.match(rendered, /tools\.profile` is `coding` and `memory_fault_recover` is allowed/);
   } finally {
-    delete process.env.LIGHTMEM2_OPENCLAW_HOME;
+    delete process.env.OPENCLAW_STATE_DIR;
     delete process.env.OPENCLAW_CONFIG_PATH;
     rmSync(root, { recursive: true, force: true });
   }
@@ -123,7 +123,7 @@ test("inspectOpenClawDoctor reports config drift with targeted fixes", async () 
 test("inspectOpenClawDoctor reports missing config path", async () => {
   const root = makeTempRoot();
   const missingConfigPath = join(root, ".openclaw", "missing.json");
-  process.env.LIGHTMEM2_OPENCLAW_HOME = root;
+  process.env.OPENCLAW_STATE_DIR = join(root, ".openclaw");
   process.env.OPENCLAW_CONFIG_PATH = missingConfigPath;
 
   try {
@@ -135,7 +135,7 @@ test("inspectOpenClawDoctor reports missing config path", async () => {
     assert.match(rendered, /OpenClaw config file not found/);
     assert.match(rendered, /recreate the OpenClaw TokenPilot install/);
   } finally {
-    delete process.env.LIGHTMEM2_OPENCLAW_HOME;
+    delete process.env.OPENCLAW_STATE_DIR;
     delete process.env.OPENCLAW_CONFIG_PATH;
     rmSync(root, { recursive: true, force: true });
   }
