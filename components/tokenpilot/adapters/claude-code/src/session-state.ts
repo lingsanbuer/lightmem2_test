@@ -1,6 +1,11 @@
-import { randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {
+  appendRecentTurnBinding,
+  loadRecentTurnBindings,
+  loadSessionSnapshot,
+  resolveLatestSessionId,
+  writeLatestSessionRef,
+  writeSessionSnapshot,
+} from "@tokenpilot/host-adapter";
 
 export type ClaudeCodeSessionSnapshot = {
   sessionId: string;
@@ -34,64 +39,15 @@ export type ClaudeCodeRecentTurnBinding = {
   updatedAt: string;
 };
 
-type LatestClaudeCodeSessionRef = {
-  sessionId: string;
-  updatedAt: string;
-};
-
-function encodeSessionId(sessionId: string): string {
-  return encodeURIComponent(sessionId);
-}
-
-function sessionSnapshotPath(stateDir: string, sessionId: string): string {
-  return join(stateDir, "session-state", "sessions", `${encodeSessionId(sessionId)}.json`);
-}
-
-function recentTurnBindingsPath(stateDir: string, sessionId: string): string {
-  return join(stateDir, "session-state", "bindings", `${encodeSessionId(sessionId)}.jsonl`);
-}
-
-function latestSessionPath(stateDir: string): string {
-  return join(stateDir, "session-state", "latest.json");
-}
-
-async function readJsonFile<T>(path: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function writeJsonFileAtomic(path: string, payload: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  try {
-    await rename(tempPath, path);
-  } catch (error) {
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function appendJsonl(path: string, payload: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(payload)}\n`, "utf8");
-}
-
 async function markLatestSession(stateDir: string, sessionId: string, updatedAt: string): Promise<void> {
-  await writeJsonFileAtomic(latestSessionPath(stateDir), {
-    sessionId,
-    updatedAt,
-  } satisfies LatestClaudeCodeSessionRef);
+  await writeLatestSessionRef(stateDir, sessionId, updatedAt);
 }
 
 export async function loadClaudeCodeSessionSnapshot(
   stateDir: string,
   sessionId: string,
 ): Promise<ClaudeCodeSessionSnapshot | null> {
-  return readJsonFile<ClaudeCodeSessionSnapshot>(sessionSnapshotPath(stateDir, sessionId));
+  return loadSessionSnapshot<ClaudeCodeSessionSnapshot>(stateDir, sessionId);
 }
 
 export async function upsertClaudeCodeSessionSnapshot(
@@ -117,7 +73,7 @@ export async function upsertClaudeCodeSessionSnapshot(
     reductionSavedChars: patch.reductionSavedChars ?? current?.reductionSavedChars,
     updatedAt,
   };
-  await writeJsonFileAtomic(sessionSnapshotPath(stateDir, sessionId), next);
+  await writeSessionSnapshot(stateDir, sessionId, next);
   await markLatestSession(stateDir, sessionId, updatedAt);
   return next;
 }
@@ -126,8 +82,7 @@ export async function appendClaudeCodeRecentTurnBinding(
   stateDir: string,
   binding: ClaudeCodeRecentTurnBinding,
 ): Promise<void> {
-  await appendJsonl(recentTurnBindingsPath(stateDir, binding.sessionId), binding);
-  await markLatestSession(stateDir, binding.sessionId, binding.updatedAt);
+  await appendRecentTurnBinding(stateDir, binding);
 }
 
 export async function loadClaudeCodeRecentTurnBindings(
@@ -135,21 +90,15 @@ export async function loadClaudeCodeRecentTurnBindings(
   sessionId: string,
   limit = 8,
 ): Promise<ClaudeCodeRecentTurnBinding[]> {
-  try {
-    const raw = await readFile(recentTurnBindingsPath(stateDir, sessionId), "utf8");
-    const lines = raw.split(/\r?\n/).filter(Boolean);
-    return lines
-      .slice(-Math.max(1, limit))
-      .reverse()
-      .map((line) => JSON.parse(line) as ClaudeCodeRecentTurnBinding)
-      .filter((entry) => typeof entry.sessionId === "string" && entry.sessionId.length > 0);
-  } catch {
-    return [];
-  }
+  return loadRecentTurnBindings<ClaudeCodeRecentTurnBinding>(
+    stateDir,
+    sessionId,
+    limit,
+    (entry): entry is ClaudeCodeRecentTurnBinding =>
+      Boolean(entry && typeof entry === "object" && typeof (entry as { sessionId?: unknown }).sessionId === "string"),
+  );
 }
 
 export async function resolveLatestClaudeCodeSessionId(stateDir: string): Promise<string | undefined> {
-  const latest = await readJsonFile<LatestClaudeCodeSessionRef>(latestSessionPath(stateDir));
-  const sessionId = typeof latest?.sessionId === "string" ? latest.sessionId.trim() : "";
-  return sessionId || undefined;
+  return resolveLatestSessionId(stateDir);
 }

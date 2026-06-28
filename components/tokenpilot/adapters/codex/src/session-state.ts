@@ -1,6 +1,16 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile, appendFile, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {
+  appendRecentTurnBinding,
+  loadRecentTurnBindings,
+  loadSessionSnapshot,
+  readJsonFile,
+  resolveLatestSessionId,
+  sessionStateRoot,
+  sessionSnapshotPath,
+  writeJsonFileAtomic,
+  writeLatestSessionRef,
+  writeSessionSnapshot,
+} from "@tokenpilot/host-adapter";
+import { join } from "node:path";
 
 export type CodexSessionSnapshot = {
   sessionId: string;
@@ -28,11 +38,6 @@ export type CodexRecentTurnBinding = {
   updatedAt: string;
 };
 
-type LatestCodexSessionRef = {
-  sessionId: string;
-  updatedAt: string;
-};
-
 type CodexResponseSessionRef = {
   responseId: string;
   sessionId: string;
@@ -45,67 +50,23 @@ type CodexPromptCacheKeySessionRef = {
   updatedAt: string;
 };
 
-function encodeSessionId(sessionId: string): string {
-  return encodeURIComponent(sessionId);
-}
-
-function sessionSnapshotPath(stateDir: string, sessionId: string): string {
-  return join(stateDir, "session-state", "sessions", `${encodeSessionId(sessionId)}.json`);
-}
-
-function recentTurnBindingsPath(stateDir: string, sessionId: string): string {
-  return join(stateDir, "session-state", "bindings", `${encodeSessionId(sessionId)}.jsonl`);
-}
-
-function latestSessionPath(stateDir: string): string {
-  return join(stateDir, "session-state", "latest.json");
-}
-
 function responseSessionPath(stateDir: string, responseId: string): string {
-  return join(stateDir, "session-state", "responses", `${encodeURIComponent(responseId)}.json`);
+  return join(sessionStateRoot(stateDir), "responses", `${encodeURIComponent(responseId)}.json`);
 }
 
 function promptCacheKeySessionPath(stateDir: string, promptCacheKey: string): string {
-  return join(stateDir, "session-state", "prompt-cache-keys", `${encodeURIComponent(promptCacheKey)}.json`);
-}
-
-async function readJsonFile<T>(path: string): Promise<T | null> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function writeJsonFileAtomic(path: string, payload: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  try {
-    await rename(tempPath, path);
-  } catch (error) {
-    await unlink(tempPath).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function appendJsonl(path: string, payload: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await appendFile(path, `${JSON.stringify(payload)}\n`, "utf8");
+  return join(sessionStateRoot(stateDir), "prompt-cache-keys", `${encodeURIComponent(promptCacheKey)}.json`);
 }
 
 async function markLatestSession(stateDir: string, sessionId: string, updatedAt: string): Promise<void> {
-  await writeJsonFileAtomic(latestSessionPath(stateDir), {
-    sessionId,
-    updatedAt,
-  } satisfies LatestCodexSessionRef);
+  await writeLatestSessionRef(stateDir, sessionId, updatedAt);
 }
 
 export async function loadCodexSessionSnapshot(
   stateDir: string,
   sessionId: string,
 ): Promise<CodexSessionSnapshot | null> {
-  return readJsonFile<CodexSessionSnapshot>(sessionSnapshotPath(stateDir, sessionId));
+  return loadSessionSnapshot<CodexSessionSnapshot>(stateDir, sessionId);
 }
 
 export async function upsertCodexSessionSnapshot(
@@ -127,7 +88,7 @@ export async function upsertCodexSessionSnapshot(
     lastToolOutputChars: patch.lastToolOutputChars ?? current?.lastToolOutputChars,
     updatedAt,
   };
-  await writeJsonFileAtomic(sessionSnapshotPath(stateDir, sessionId), next);
+  await writeSessionSnapshot(stateDir, sessionId, next);
   await markLatestSession(stateDir, sessionId, updatedAt);
   return next;
 }
@@ -136,8 +97,7 @@ export async function appendCodexRecentTurnBinding(
   stateDir: string,
   binding: CodexRecentTurnBinding,
 ): Promise<void> {
-  await appendJsonl(recentTurnBindingsPath(stateDir, binding.sessionId), binding);
-  await markLatestSession(stateDir, binding.sessionId, binding.updatedAt);
+  await appendRecentTurnBinding(stateDir, binding);
 }
 
 export async function indexCodexResponseSession(
@@ -199,21 +159,15 @@ export async function loadCodexRecentTurnBindings(
   sessionId: string,
   limit = 8,
 ): Promise<CodexRecentTurnBinding[]> {
-  try {
-    const raw = await readFile(recentTurnBindingsPath(stateDir, sessionId), "utf8");
-    const lines = raw.split(/\r?\n/).filter(Boolean);
-    return lines
-      .slice(-Math.max(1, limit))
-      .reverse()
-      .map((line) => JSON.parse(line) as CodexRecentTurnBinding)
-      .filter((entry) => typeof entry.sessionId === "string" && entry.sessionId.length > 0);
-  } catch {
-    return [];
-  }
+  return loadRecentTurnBindings<CodexRecentTurnBinding>(
+    stateDir,
+    sessionId,
+    limit,
+    (entry): entry is CodexRecentTurnBinding =>
+      Boolean(entry && typeof entry === "object" && typeof (entry as { sessionId?: unknown }).sessionId === "string"),
+  );
 }
 
 export async function resolveLatestCodexSessionId(stateDir: string): Promise<string | undefined> {
-  const latest = await readJsonFile<LatestCodexSessionRef>(latestSessionPath(stateDir));
-  const sessionId = typeof latest?.sessionId === "string" ? latest.sessionId.trim() : "";
-  return sessionId || undefined;
+  return resolveLatestSessionId(stateDir);
 }
