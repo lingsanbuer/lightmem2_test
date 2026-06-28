@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 
 import { createCodexCliBridge } from "../../../products/cli/src/hosts/codex.js";
 import { loadTokenPilotCodexConfig, defaultTokenPilotConfigPath } from "../src/config.js";
+import { indexCodexHostSessionAlias } from "../src/session-state.js";
 
 test("codex cli bridge exposes only the supported Codex command surface", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-bridge-"));
@@ -163,6 +164,60 @@ test("codex cli bridge report explains when a session has no recorded savings ye
     const { handleCommand } = createCodexCliBridge({ host: "codex" });
     const report = await handleCommand({ args: "report" });
     assert.equal(report.text, "No TokenPilot savings recorded yet for session session-empty.");
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex cli bridge accepts a real codex session id and resolves it to the synthesized session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-bridge-real-session-"));
+  const originalHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    const stateDir = join(dir, ".codex", "tokenpilot-state", "tokenpilot");
+    await mkdir(join(stateDir, "ux-effects", "sessions"), { recursive: true });
+    await indexCodexHostSessionAlias(stateDir, "019f-real-codex-session", "codex-synth-a");
+    await writeFile(
+      join(stateDir, "ux-effects", "latest.json"),
+      JSON.stringify({
+        at: "2026-06-28T10:00:00.000Z",
+        sessionId: "codex-synth-a",
+        model: "gpt-5.4-mini",
+        countMode: "chars",
+        beforeCount: 1000,
+        afterCount: 700,
+        savedCount: 300,
+      }, null, 2),
+      "utf8",
+    );
+    await writeFile(
+      join(stateDir, "ux-effects", "sessions", "codex-synth-a.json"),
+      JSON.stringify({
+        sessionId: "codex-synth-a",
+        turns: 2,
+        latestCountMode: "chars",
+        tokenOptimizedTurns: 0,
+        tokenSavedCount: 0,
+        avgSavedTokensPerOptimizedTurn: 0,
+        charOptimizedTurns: 1,
+        charSavedCount: 300,
+        avgSavedCharsPerOptimizedTurn: 300,
+        latestAt: "2026-06-28T10:00:00.000Z",
+      }, null, 2),
+      "utf8",
+    );
+
+    const { handleCommand } = createCodexCliBridge({
+      host: "codex",
+      sessionId: "019f-real-codex-session",
+    });
+    const report = await handleCommand({ args: "report" });
+    assert.match(report.text, /session: codex-synth-a/);
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;

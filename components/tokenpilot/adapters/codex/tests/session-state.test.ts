@@ -11,6 +11,7 @@ import {
   loadCodexRecentTurnBindings,
   loadCodexSessionSnapshot,
   mergeCodexSessionSnapshot,
+  resolveCanonicalCodexSessionId,
   resolveCodexSessionAlias,
   resolveCodexSessionIdByPromptCacheKey,
   resolveLatestCodexSessionId,
@@ -92,6 +93,21 @@ test("session-state resolves host codex session aliases", async () => {
 
     assert.equal(resolved, "codex-synth-a");
     assert.equal(missing, undefined);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});
+
+test("session-state resolves canonical codex session ids through host aliases", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "lightmem2-codex-session-canonical-"));
+  try {
+    await indexCodexHostSessionAlias(stateDir, "019f-real-codex-session", "codex-synth-a");
+
+    const aliased = await resolveCanonicalCodexSessionId(stateDir, "019f-real-codex-session");
+    const passthrough = await resolveCanonicalCodexSessionId(stateDir, "codex-synth-a");
+
+    assert.equal(aliased, "codex-synth-a");
+    assert.equal(passthrough, "codex-synth-a");
   } finally {
     await rm(stateDir, { recursive: true, force: true });
   }

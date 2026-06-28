@@ -23,7 +23,10 @@ import {
   codexProductSurfaceConfigAdapter,
   resolveCodexStateDir,
 } from "../../../../adapters/codex/src/host-config-adapter.js";
-import { resolveLatestCodexSessionId } from "../../../../adapters/codex/src/session-state.js";
+import {
+  resolveCanonicalCodexSessionId,
+  resolveLatestCodexSessionId,
+} from "../../../../adapters/codex/src/session-state.js";
 import { renderCodexSessionVisual } from "../../../../adapters/codex/src/session-visual.js";
 import { readCodexUxSessionAggregate, readLatestCodexUxEffect } from "../../../../adapters/codex/src/ux-effects.js";
 import { buildSessionReportResult, resolvePreferredSessionId } from "./shared.js";
@@ -51,6 +54,23 @@ async function writeConfig(nextConfig: Record<string, unknown>): Promise<void> {
 async function maybeResolveLatestSessionId(): Promise<string | undefined> {
   const currentConfig = await loadConfig();
   const stateDir = resolveCodexStateDir(currentConfig);
+  return resolvePreferredSessionId({
+    stateDir,
+    resolveLatestSessionId: resolveLatestCodexSessionId,
+    readLatestUxEffect: readLatestCodexUxEffect,
+  });
+}
+
+async function resolveCodexCliSessionId(params: {
+  currentConfig: Record<string, unknown>;
+  explicitSessionId?: string;
+}): Promise<string | undefined> {
+  const stateDir = resolveCodexStateDir(params.currentConfig);
+  if (!stateDir) return undefined;
+  const explicit = typeof params.explicitSessionId === "string" ? params.explicitSessionId.trim() : "";
+  if (explicit) {
+    return resolveCanonicalCodexSessionId(stateDir, explicit);
+  }
   return resolvePreferredSessionId({
     stateDir,
     resolveLatestSessionId: resolveLatestCodexSessionId,
@@ -219,20 +239,22 @@ export function createCodexCliBridge(target: {
       if (!stateDir) {
         return { text: "TokenPilot stateDir is not configured." };
       }
-      const sessionId = await resolvePreferredSessionId({
+      const sessionId = await resolveCodexCliSessionId({
+        currentConfig,
         explicitSessionId: target.sessionId,
-        stateDir,
-        resolveLatestSessionId: resolveLatestCodexSessionId,
-        readLatestUxEffect: readLatestCodexUxEffect,
       });
       return {
         text: await renderCodexSessionVisual(stateDir, sessionId),
       };
     },
     async handleReport(_ctx, currentConfig) {
-      return buildSessionReportResult({
+      const sessionId = await resolveCodexCliSessionId({
         currentConfig,
         explicitSessionId: target.sessionId,
+      });
+      return buildSessionReportResult({
+        currentConfig,
+        explicitSessionId: sessionId,
         configAdapter: codexProductSurfaceConfigAdapter,
         resolveLatestSessionId: resolveLatestCodexSessionId,
         readLatestUxEffect: readLatestCodexUxEffect,

@@ -1,7 +1,7 @@
 import {
   loadCodexRecentTurnBindings,
   loadCodexSessionSnapshot,
-  resolveLatestCodexSessionId,
+  resolveCanonicalCodexSessionId,
   type CodexRecentTurnBinding,
 } from "./session-state.js";
 
@@ -41,7 +41,7 @@ export async function resolveCodexSessionTopology(
   stateDir: string,
   sessionRef?: string,
 ): Promise<CodexSessionTopology | undefined> {
-  const sessionId = normalizeSessionId(sessionRef) ?? await resolveLatestCodexSessionId(stateDir);
+  const sessionId = await resolveCanonicalCodexSessionId(stateDir, normalizeSessionId(sessionRef));
   if (!sessionId) return undefined;
 
   const [snapshot, bindings] = await Promise.all([

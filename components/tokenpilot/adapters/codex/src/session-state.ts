@@ -246,3 +246,14 @@ export async function loadCodexRecentTurnBindings(
 export async function resolveLatestCodexSessionId(stateDir: string): Promise<string | undefined> {
   return resolveLatestSessionId(stateDir);
 }
+
+export async function resolveCanonicalCodexSessionId(
+  stateDir: string,
+  sessionRef?: string,
+): Promise<string | undefined> {
+  const normalizedSessionRef = typeof sessionRef === "string" ? sessionRef.trim() : "";
+  if (normalizedSessionRef) {
+    return await resolveCodexSessionAlias(stateDir, normalizedSessionRef) ?? normalizedSessionRef;
+  }
+  return resolveLatestCodexSessionId(stateDir);
+}
