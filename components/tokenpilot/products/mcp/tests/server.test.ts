@@ -10,6 +10,7 @@ import {
   handleMcpRequest,
   MEMORY_FAULT_RECOVER_TOOL_NAME,
   probeTokenPilotMcpServer,
+  resolveTokenPilotMcpPackageRoot,
   resolveTokenPilotMcpProbeServerSpec,
   resolveMemoryFaultRecover,
   resolveTokenPilotMcpServerSpec,
@@ -140,6 +141,31 @@ test("probe MCP spec can fall back to source entry when dist is unavailable", ()
   } else {
     assert.deepEqual(spec.args, [spec.entryPath]);
   }
+});
+
+test("MCP package root resolver does not confuse bundled CLI dist with the MCP package", () => {
+  const packageRoot = resolveTokenPilotMcpPackageRoot({
+    moduleDir: join(
+      process.cwd(),
+      "components",
+      "tokenpilot",
+      "products",
+      "cli",
+      "dist",
+    ),
+    cwd: process.cwd(),
+  });
+
+  assert.match(packageRoot, /components[\/\\]tokenpilot[\/\\]products[\/\\]mcp$/);
+});
+
+test("MCP package root resolver honors explicit override", () => {
+  const override = join(process.cwd(), "components", "tokenpilot", "products", "mcp");
+  const packageRoot = resolveTokenPilotMcpPackageRoot({
+    override,
+  });
+
+  assert.equal(packageRoot, override);
 });
 
 function tryExtractContentLengthBody(stdout: string): string | null {

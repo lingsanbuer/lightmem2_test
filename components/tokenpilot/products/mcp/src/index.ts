@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -51,14 +51,55 @@ export type TokenPilotMcpHealthSummary = {
 };
 
 function packageRootFromHere(): string {
-  const moduleDir = __dirname;
+  return resolveTokenPilotMcpPackageRoot();
+}
+
+function isTokenPilotMcpPackageRoot(candidate: string): boolean {
+  const packageJsonPath = join(candidate, "package.json");
+  if (!existsSync(packageJsonPath)) return false;
+  if (!existsSync(join(candidate, "dist", "server.js")) && !existsSync(join(candidate, "src", "server.ts"))) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string };
+    return parsed.name === "@tokenpilot/mcp";
+  } catch {
+    return false;
+  }
+}
+
+export function resolveTokenPilotMcpPackageRoot(params?: {
+  moduleDir?: string;
+  cwd?: string;
+  override?: string | null;
+}): string {
+  const override = params?.override?.trim() || process.env.TOKENPILOT_MCP_PACKAGE_ROOT?.trim();
+  if (override) {
+    return resolve(override);
+  }
+  const moduleDir = params?.moduleDir ?? __dirname;
   const fromDist = resolve(moduleDir, "..");
-  if (existsSync(join(fromDist, "package.json")) && existsSync(join(fromDist, "dist", "server.js"))) {
+  if (isTokenPilotMcpPackageRoot(fromDist)) {
     return fromDist;
   }
   let current = resolve(moduleDir, "..");
-  for (let i = 0; i < 8; i += 1) {
-    if (existsSync(join(current, "package.json")) && existsSync(join(current, "src", "server.ts"))) {
+  for (let i = 0; i < 10; i += 1) {
+    const directCandidate = join(current, "components", "tokenpilot", "products", "mcp");
+    if (isTokenPilotMcpPackageRoot(directCandidate)) {
+      return directCandidate;
+    }
+    if (isTokenPilotMcpPackageRoot(current)) {
+      return current;
+    }
+    current = dirname(current);
+  }
+  current = resolve(params?.cwd ?? process.cwd());
+  for (let i = 0; i < 10; i += 1) {
+    const directCandidate = join(current, "components", "tokenpilot", "products", "mcp");
+    if (isTokenPilotMcpPackageRoot(directCandidate)) {
+      return directCandidate;
+    }
+    if (isTokenPilotMcpPackageRoot(current)) {
       return current;
     }
     current = dirname(current);
