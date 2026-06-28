@@ -76,3 +76,42 @@ test("shared ux store records latest effect and session aggregate", async () => 
     await rm(stateDir, { recursive: true, force: true });
   }
 });
+
+test("shared ux store keeps token and char aggregates independently", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "lightmem2-host-ux-store-mixed-"));
+  try {
+    await recordUxEffect(stateDir, {
+      at: "2026-06-28T12:10:00.000Z",
+      sessionId: "session-ux-mixed",
+      model: "test-model",
+      countMode: "chars",
+      beforeCount: 1000,
+      afterCount: 700,
+      savedCount: 300,
+    });
+    await recordUxEffect(stateDir, {
+      at: "2026-06-28T12:11:00.000Z",
+      sessionId: "session-ux-mixed",
+      model: "test-model",
+      countMode: "litellm_tokens",
+      beforeCount: 800,
+      afterCount: 650,
+      savedCount: 150,
+    });
+
+    const latest = await readLatestUxEffect(stateDir);
+    const aggregate = await readUxSessionAggregate(stateDir, "session-ux-mixed");
+
+    assert.equal(latest?.countMode, "litellm_tokens");
+    assert.equal(aggregate?.turns, 2);
+    assert.equal(aggregate?.latestCountMode, "litellm_tokens");
+    assert.equal(aggregate?.charOptimizedTurns, 1);
+    assert.equal(aggregate?.charSavedCount, 300);
+    assert.equal(aggregate?.avgSavedCharsPerOptimizedTurn, 300);
+    assert.equal(aggregate?.tokenOptimizedTurns, 1);
+    assert.equal(aggregate?.tokenSavedCount, 150);
+    assert.equal(aggregate?.avgSavedTokensPerOptimizedTurn, 150);
+  } finally {
+    await rm(stateDir, { recursive: true, force: true });
+  }
+});

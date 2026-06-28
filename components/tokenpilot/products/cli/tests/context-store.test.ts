@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -35,6 +35,24 @@ test("context store reads empty state by default and persists updates", async ()
     const replaced = await readCliContextState(file);
     assert.equal(replaced.lastActiveHost, "codex");
     assert.equal(replaced.lastSessionByHost?.codex, "sess-2");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("context store falls back cleanly when the persisted file is invalid JSON", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-cli-context-invalid-"));
+  const file = join(dir, "cli-context.json");
+  try {
+    await writeFile(file, "{not-valid-json", "utf8");
+
+    const state = await readCliContextState(file);
+    assert.deepEqual(state, { lastSessionByHost: {} });
+
+    await updateCliContextState({ host: "codex", sessionId: "sess-recovered" }, file);
+    const recovered = await readCliContextState(file);
+    assert.equal(recovered.lastActiveHost, "codex");
+    assert.equal(recovered.lastSessionByHost?.codex, "sess-recovered");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
