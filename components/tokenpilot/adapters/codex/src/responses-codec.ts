@@ -107,6 +107,7 @@ export function createCodexResponsesPayloadCodec(
       const messages = Array.isArray(payload.input)
         ? payload.input.map((item: any) => {
             if (!item || typeof item !== "object") return item;
+            if (typeof item.role !== "string") return item;
             const originalRole = typeof item.role === "string" ? item.role : undefined;
             const normalizedRole = normalizeMessageRole(originalRole);
             return {

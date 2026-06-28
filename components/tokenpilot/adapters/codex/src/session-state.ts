@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile, appendFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, writeFile, appendFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export type CodexSessionSnapshot = {
@@ -38,6 +39,12 @@ type CodexResponseSessionRef = {
   updatedAt: string;
 };
 
+type CodexPromptCacheKeySessionRef = {
+  promptCacheKey: string;
+  sessionId: string;
+  updatedAt: string;
+};
+
 function encodeSessionId(sessionId: string): string {
   return encodeURIComponent(sessionId);
 }
@@ -58,6 +65,10 @@ function responseSessionPath(stateDir: string, responseId: string): string {
   return join(stateDir, "session-state", "responses", `${encodeURIComponent(responseId)}.json`);
 }
 
+function promptCacheKeySessionPath(stateDir: string, promptCacheKey: string): string {
+  return join(stateDir, "session-state", "prompt-cache-keys", `${encodeURIComponent(promptCacheKey)}.json`);
+}
+
 async function readJsonFile<T>(path: string): Promise<T | null> {
   try {
     return JSON.parse(await readFile(path, "utf8")) as T;
@@ -68,9 +79,14 @@ async function readJsonFile<T>(path: string): Promise<T | null> {
 
 async function writeJsonFileAtomic(path: string, payload: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tempPath = `${path}.tmp`;
+  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await rename(tempPath, path);
+  try {
+    await rename(tempPath, path);
+  } catch (error) {
+    await unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function appendJsonl(path: string, payload: unknown): Promise<void> {
@@ -146,6 +162,34 @@ export async function resolveCodexSessionIdByResponseId(
   const normalizedResponseId = responseId.trim();
   if (!normalizedResponseId) return undefined;
   const record = await readJsonFile<CodexResponseSessionRef>(responseSessionPath(stateDir, normalizedResponseId));
+  const sessionId = typeof record?.sessionId === "string" ? record.sessionId.trim() : "";
+  return sessionId || undefined;
+}
+
+export async function indexCodexPromptCacheKeySession(
+  stateDir: string,
+  promptCacheKey: string,
+  sessionId: string,
+): Promise<void> {
+  const normalizedPromptCacheKey = promptCacheKey.trim();
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedPromptCacheKey || !normalizedSessionId) return;
+  await writeJsonFileAtomic(promptCacheKeySessionPath(stateDir, normalizedPromptCacheKey), {
+    promptCacheKey: normalizedPromptCacheKey,
+    sessionId: normalizedSessionId,
+    updatedAt: new Date().toISOString(),
+  } satisfies CodexPromptCacheKeySessionRef);
+}
+
+export async function resolveCodexSessionIdByPromptCacheKey(
+  stateDir: string,
+  promptCacheKey: string,
+): Promise<string | undefined> {
+  const normalizedPromptCacheKey = promptCacheKey.trim();
+  if (!normalizedPromptCacheKey) return undefined;
+  const record = await readJsonFile<CodexPromptCacheKeySessionRef>(
+    promptCacheKeySessionPath(stateDir, normalizedPromptCacheKey),
+  );
   const sessionId = typeof record?.sessionId === "string" ? record.sessionId.trim() : "";
   return sessionId || undefined;
 }

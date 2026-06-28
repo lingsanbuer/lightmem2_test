@@ -27,7 +27,9 @@ import {
 } from "./upstream.js";
 import {
   appendCodexRecentTurnBinding,
+  indexCodexPromptCacheKeySession,
   indexCodexResponseSession,
+  resolveCodexSessionIdByPromptCacheKey,
   resolveCodexSessionIdByResponseId,
   upsertCodexSessionSnapshot,
 } from "./session-state.js";
@@ -113,13 +115,19 @@ export async function startCodexResponsesProxy(params: {
       const body = await readRequestBody(req);
       const payload = JSON.parse(body);
       normalizeResponsesInputForUpstream(payload?.input);
+      const inboundPromptCacheKey =
+        typeof payload?.prompt_cache_key === "string" ? payload.prompt_cache_key.trim() : "";
       const mappedPreviousSessionId =
         typeof payload?.previous_response_id === "string"
           ? await resolveCodexSessionIdByResponseId(config.stateDir, payload.previous_response_id)
           : undefined;
+      const mappedPromptCacheSessionId =
+        !mappedPreviousSessionId && inboundPromptCacheKey
+          ? await resolveCodexSessionIdByPromptCacheKey(config.stateDir, inboundPromptCacheKey)
+          : undefined;
       const codec = createCodexResponsesPayloadCodec(
         createCodexSessionResolver({
-          mappedPreviousSessionId,
+          mappedPreviousSessionId: mappedPreviousSessionId ?? mappedPromptCacheSessionId,
         }),
       );
       let envelope = codec.decodeRequest(payload);
@@ -132,6 +140,9 @@ export async function startCodexResponsesProxy(params: {
         syncPayloadFromEnvelope(payload, envelope, codec);
       }
       const sessionId = envelope.session.sessionId;
+      if (inboundPromptCacheKey) {
+        await indexCodexPromptCacheKeySession(config.stateDir, inboundPromptCacheKey, sessionId);
+      }
       let reductionSummary: CodexReductionSummary | undefined;
       const prepared = await prepareBeforeCall({
         envelope,
@@ -197,41 +208,56 @@ export async function startCodexResponsesProxy(params: {
           streamChunks.push(buffer);
           res.write(buffer);
         });
-        upstreamResp.stream.once("end", () => {
+        upstreamResp.stream.once("end", async () => {
           const rawStreamText = Buffer.concat(streamChunks).toString("utf8");
           const snapshot = snapshotCodexResponsesStream(rawStreamText);
-          void appendTrace(config.stateDir, {
-            stage: "proxy_after_call",
-            sessionId,
-            model,
-            status: upstreamResp.status,
-            stream: true,
-            completed: true,
-            responseChars: rawStreamText.length,
-            assistantChars: snapshot.assistantText.length,
-            responseId: snapshot.responseId ?? null,
-            previousResponseId: snapshot.previousResponseId ?? null,
-          });
-          void upsertCodexSessionSnapshot(config.stateDir, sessionId, {
-            latestResponseId: snapshot.responseId,
-            previousResponseId: snapshot.previousResponseId,
-            latestModel: model,
-          });
-          if (typeof snapshot.responseId === "string" && snapshot.responseId) {
-            void indexCodexResponseSession(config.stateDir, snapshot.responseId, sessionId);
+          try {
+            await appendTrace(config.stateDir, {
+              stage: "proxy_after_call",
+              sessionId,
+              model,
+              status: upstreamResp.status,
+              stream: true,
+              completed: true,
+              responseChars: rawStreamText.length,
+              assistantChars: snapshot.assistantText.length,
+              responseId: snapshot.responseId ?? null,
+              previousResponseId: snapshot.previousResponseId ?? null,
+            });
+            await upsertCodexSessionSnapshot(config.stateDir, sessionId, {
+              latestResponseId: snapshot.responseId,
+              previousResponseId: snapshot.previousResponseId,
+              latestModel: model,
+            });
+            if (typeof snapshot.responseId === "string" && snapshot.responseId) {
+              await indexCodexResponseSession(config.stateDir, snapshot.responseId, sessionId);
+            }
+            await appendCodexRecentTurnBinding(config.stateDir, {
+              sessionId,
+              responseId: snapshot.responseId,
+              previousResponseId: snapshot.previousResponseId,
+              model,
+              requestChars: requestText.length,
+              responseChars: rawStreamText.length,
+              assistantChars: snapshot.assistantText.length,
+              stream: true,
+              updatedAt: new Date().toISOString(),
+            });
+            res.end();
+          } catch (err) {
+            void appendTrace(config.stateDir, {
+              stage: "proxy_after_call",
+              sessionId,
+              model,
+              status: upstreamResp.status,
+              stream: true,
+              completed: false,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            if (!res.destroyed) {
+              res.destroy(err instanceof Error ? err : new Error(String(err)));
+            }
           }
-          void appendCodexRecentTurnBinding(config.stateDir, {
-            sessionId,
-            responseId: snapshot.responseId,
-            previousResponseId: snapshot.previousResponseId,
-            model,
-            requestChars: requestText.length,
-            responseChars: rawStreamText.length,
-            assistantChars: snapshot.assistantText.length,
-            stream: true,
-            updatedAt: new Date().toISOString(),
-          });
-          res.end();
         });
         upstreamResp.stream.once("error", (err) => {
           void appendTrace(config.stateDir, {
