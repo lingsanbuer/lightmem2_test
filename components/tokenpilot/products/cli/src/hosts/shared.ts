@@ -81,6 +81,22 @@ export async function resolvePreferredSessionId(params: {
     ?? normalizeSessionId((await params.readLatestUxEffect(stateDir))?.sessionId);
 }
 
+export async function resolveConfiguredPreferredSessionId(params: {
+  loadConfig(): Promise<Record<string, unknown>>;
+  resolveStateDir(config: Record<string, unknown>): string | undefined;
+  resolveLatestSessionId(stateDir: string): Promise<string | undefined>;
+  readLatestUxEffect(stateDir: string): Promise<{ sessionId?: string | null } | null>;
+}): Promise<string | undefined> {
+  const currentConfig = await params.loadConfig();
+  const stateDir = normalizeSessionId(params.resolveStateDir(currentConfig));
+  if (!stateDir) return undefined;
+  return resolvePreferredSessionId({
+    stateDir,
+    resolveLatestSessionId: params.resolveLatestSessionId,
+    readLatestUxEffect: params.readLatestUxEffect,
+  });
+}
+
 export async function buildSessionReportResult(params: {
   currentConfig: Record<string, unknown>;
   explicitSessionId?: string;

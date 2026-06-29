@@ -6,11 +6,11 @@ import type {
   TokenPilotProductSurfaceConfigAdapter,
   TokenPilotProductSurfaceHostBridge,
 } from "@tokenpilot/host-adapter";
-import { formatSessionReport, getNestedValue } from "@tokenpilot/product-surface";
 import { readLatestUxEffect, readSessionUxAggregate } from "../../../../adapters/openclaw/src/context-stack/integration/ux-effects.js";
 import { resolveOpenClawConfigPath } from "../../../../adapters/openclaw/src/context-stack/integration/openclaw-paths.js";
 import { openClawProductSurfaceConfigAdapter, resolveStateDir } from "../../../../adapters/openclaw/src/commands/tokenpilot/host-config-adapter.js";
 import { formatOpenClawDoctorReport, inspectOpenClawDoctor } from "../../../../adapters/openclaw/src/commands/tokenpilot/openclaw-doctor.js";
+import { buildSessionReportResult, resolveConfiguredPreferredSessionId } from "./shared.js";
 
 function normalizeSessionId(value: unknown): string | undefined {
   const text = typeof value === "string" ? value.trim() : "";
@@ -70,11 +70,14 @@ async function writeConfig(nextConfig: Record<string, unknown>): Promise<void> {
 }
 
 async function maybeResolveLatestSessionId(): Promise<string | undefined> {
-  const currentConfig = await loadConfig();
-  const stateDir = resolveStateDir(currentConfig);
-  if (!stateDir) return undefined;
-  const latest = await readLatestUxEffect(stateDir);
-  return normalizeSessionId(latest?.sessionId);
+  return resolveConfiguredPreferredSessionId({
+    loadConfig,
+    resolveStateDir,
+    async resolveLatestSessionId() {
+      return undefined;
+    },
+    readLatestUxEffect,
+  });
 }
 
 async function ensureVisualServerForStateDir(stateDir: string): Promise<string> {
@@ -178,29 +181,16 @@ export function createOpenClawCliBridge(target: {
       return { text: lines.join("\n") };
     },
     async handleReport(_ctx, currentConfig) {
-      const stateDir = resolveStateDir(currentConfig);
-      if (!stateDir) {
-        return { text: "TokenPilot stateDir is not configured." };
-      }
-      const latest = await readLatestUxEffect(stateDir);
-      const sessionId = normalizeSessionId(target.sessionId) ?? normalizeSessionId(latest?.sessionId);
-      if (!sessionId) {
-        return { text: "No TokenPilot session stats yet." };
-      }
-      const aggregate = await readSessionUxAggregate(stateDir, sessionId);
-      if (!aggregate) {
-        return { text: `No TokenPilot savings recorded yet for session ${sessionId}.` };
-      }
-      const pluginCfg = openClawProductSurfaceConfigAdapter.pluginConfigRecord(currentConfig);
-      const detailsEnabled = getNestedValue(pluginCfg, ["ux", "details"]) === true;
-      return {
-        text: formatSessionReport({
-          sessionId,
-          aggregate,
-          latest,
-          detailsEnabled,
-        }),
-      };
+      return buildSessionReportResult({
+        currentConfig,
+        explicitSessionId: target.sessionId,
+        configAdapter: openClawProductSurfaceConfigAdapter,
+        async resolveLatestSessionId() {
+          return undefined;
+        },
+        readLatestUxEffect,
+        readSessionAggregate: readSessionUxAggregate,
+      });
     },
   };
 

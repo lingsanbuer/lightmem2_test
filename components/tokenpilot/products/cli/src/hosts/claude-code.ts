@@ -35,6 +35,7 @@ import {
   applyStandardRuntimeModeConfig,
   buildSessionReportResult,
   createRestrictedHostCommandHandler,
+  resolveConfiguredPreferredSessionId,
   resolvePreferredSessionId,
 } from "./shared.js";
 
@@ -59,10 +60,9 @@ async function writeConfig(nextConfig: Record<string, unknown>): Promise<void> {
 }
 
 async function maybeResolveLatestSessionId(): Promise<string | undefined> {
-  const currentConfig = await loadConfig();
-  const stateDir = resolveClaudeCodeStateDir(currentConfig);
-  return resolvePreferredSessionId({
-    stateDir,
+  return resolveConfiguredPreferredSessionId({
+    loadConfig,
+    resolveStateDir: resolveClaudeCodeStateDir,
     resolveLatestSessionId: resolveLatestClaudeCodeSessionId,
     readLatestUxEffect: readLatestClaudeCodeUxEffect,
   });
