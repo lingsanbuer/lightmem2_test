@@ -202,7 +202,12 @@ export async function startCodexResponsesProxy(params: {
 
       const authorization = typeof req.headers.authorization === "string" ? req.headers.authorization : undefined;
       if (payload.stream === true) {
-        const upstreamResp = await requestUpstreamResponsesStream({ upstream, payload, inboundAuthorization: authorization });
+        const upstreamResp = await requestUpstreamResponsesStream({
+          upstream,
+          payload,
+          inboundAuthorization: authorization,
+          stateDir: config.stateDir,
+        });
         res.statusCode = upstreamResp.status;
         setForwardResponseHeaders(res, upstreamResp.headers, "text/event-stream; charset=utf-8");
         const streamChunks: Buffer[] = [];
@@ -279,7 +284,12 @@ export async function startCodexResponsesProxy(params: {
         return;
       }
 
-      const upstreamResp = await requestUpstreamResponses({ upstream, payload, inboundAuthorization: authorization });
+      const upstreamResp = await requestUpstreamResponses({
+        upstream,
+        payload,
+        inboundAuthorization: authorization,
+        stateDir: config.stateDir,
+      });
       let responseId: string | undefined;
       let previousResponseId: string | undefined;
       let assistantChars = 0;

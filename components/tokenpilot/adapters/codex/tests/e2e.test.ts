@@ -511,6 +511,253 @@ test("Codex requests reuse synth sessions through prompt_cache_key when previous
   });
 });
 
+test("Codex upstream retry drops unsupported prompt_cache_retention while preserving prompt_cache_key", async () => {
+  await withTempHome("lightmem2-codex-unsupported-retention-", async (homeDir) => {
+    const proxyPort = await reserveUnusedPort();
+    const upstreamPort = await reserveUnusedPort();
+    const stateDir = join(homeDir, ".codex", "tokenpilot-state", "tokenpilot");
+    const codexConfigPath = defaultCodexConfigPath();
+    const tokenPilotConfigPath = defaultTokenPilotConfigPath();
+    const requests: Array<Record<string, unknown>> = [];
+
+    const upstream = createHttpServer(async (req, res) => {
+      if (req.method !== "POST" || req.url !== "/v1/responses") {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "not found" }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      requests.push(payload);
+
+      if ("prompt_cache_retention" in payload) {
+        res.statusCode = 400;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          error: {
+            message: "Unsupported parameter: prompt_cache_retention",
+            type: "bad_response_status_code",
+            param: "",
+            code: "bad_response_status_code",
+          },
+        }));
+        return;
+      }
+
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: "resp-retry-1",
+        object: "response",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "ok" }],
+          },
+        ],
+      }));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(upstreamPort, "127.0.0.1", () => {
+        upstream.off("error", reject);
+        resolve();
+      });
+    });
+
+    try {
+      await writeTokenPilotCodexConfig(
+        normalizeTokenPilotCodexConfig({
+          proxyPort,
+          stateDir,
+          upstreamProvider: "OpenAI",
+          upstream: {
+            name: "OpenAI",
+            baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+            wireApi: "responses",
+            requiresOpenAIAuth: true,
+          },
+        }),
+        tokenPilotConfigPath,
+      );
+
+      const config = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
+      const runtime = await startCodexResponsesProxy({
+        config,
+        logger: createConsoleLogger(false),
+        codexConfigPath,
+      });
+
+      try {
+        const response = await fetch(`${runtime.baseUrl}/responses`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model: "tokenpilot/gpt-5.4-mini",
+            stream: false,
+            input: [
+              {
+                role: "developer",
+                content: "Your working directory is: /repo/demo\nBe precise.",
+              },
+              {
+                role: "user",
+                content: "hello",
+              },
+            ],
+          }),
+        });
+        assert.equal(response.status, 200);
+        assert.equal(requests.length, 2);
+        assert.equal(typeof requests[0]?.prompt_cache_key, "string");
+        assert.equal(requests[0]?.prompt_cache_retention, "24h");
+        assert.equal(typeof requests[1]?.prompt_cache_key, "string");
+        assert.equal("prompt_cache_retention" in (requests[1] ?? {}), false);
+      } finally {
+        await runtime.close();
+      }
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+});
+
+test("Codex caches unsupported optional Responses fields and skips retry on later requests", async () => {
+  await withTempHome("lightmem2-codex-capability-cache-", async (homeDir) => {
+    const proxyPort = await reserveUnusedPort();
+    const upstreamPort = await reserveUnusedPort();
+    const stateDir = join(homeDir, ".codex", "tokenpilot-state", "tokenpilot");
+    const codexConfigPath = defaultCodexConfigPath();
+    const tokenPilotConfigPath = defaultTokenPilotConfigPath();
+    const requests: Array<Record<string, unknown>> = [];
+
+    const upstream = createHttpServer(async (req, res) => {
+      if (req.method !== "POST" || req.url !== "/v1/responses") {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "not found" }));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      }
+      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      requests.push(payload);
+
+      if ("prompt_cache_retention" in payload) {
+        res.statusCode = 400;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          error: {
+            message: "Unsupported parameter: prompt_cache_retention",
+            type: "bad_response_status_code",
+            param: "",
+            code: "bad_response_status_code",
+          },
+        }));
+        return;
+      }
+
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: `resp-capability-${requests.length}`,
+        object: "response",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "ok" }],
+          },
+        ],
+      }));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      upstream.once("error", reject);
+      upstream.listen(upstreamPort, "127.0.0.1", () => {
+        upstream.off("error", reject);
+        resolve();
+      });
+    });
+
+    try {
+      await writeTokenPilotCodexConfig(
+        normalizeTokenPilotCodexConfig({
+          proxyPort,
+          stateDir,
+          upstreamProvider: "OpenAI",
+          upstream: {
+            name: "OpenAI",
+            baseUrl: `http://127.0.0.1:${upstreamPort}/v1`,
+            wireApi: "responses",
+            requiresOpenAIAuth: true,
+          },
+        }),
+        tokenPilotConfigPath,
+      );
+
+      const config = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
+      const runtime = await startCodexResponsesProxy({
+        config,
+        logger: createConsoleLogger(false),
+        codexConfigPath,
+      });
+
+      try {
+        const makeRequest = () => fetch(`${runtime.baseUrl}/responses`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model: "tokenpilot/gpt-5.4-mini",
+            stream: false,
+            input: [
+              {
+                role: "developer",
+                content: "Your working directory is: /repo/demo\nBe precise.",
+              },
+              {
+                role: "user",
+                content: "hello",
+              },
+            ],
+          }),
+        });
+
+        const first = await makeRequest();
+        const second = await makeRequest();
+        assert.equal(first.status, 200);
+        assert.equal(second.status, 200);
+        assert.equal(requests.length, 3);
+        assert.equal(requests[0]?.prompt_cache_retention, "24h");
+        assert.equal("prompt_cache_retention" in (requests[1] ?? {}), false);
+        assert.equal("prompt_cache_retention" in (requests[2] ?? {}), false);
+
+        const capabilityRaw = await readFile(
+          join(
+            stateDir,
+            "upstream-capabilities",
+            "responses",
+            encodeURIComponent(`http://127.0.0.1:${upstreamPort}/v1/responses`) + ".json",
+          ),
+          "utf8",
+        );
+        const capability = JSON.parse(capabilityRaw) as { unsupportedOptionalFields?: string[] };
+        assert.deepEqual(capability.unsupportedOptionalFields, ["prompt_cache_retention"]);
+      } finally {
+        await runtime.close();
+      }
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+});
+
 test("Codex CLI report and visual return clear empty-state messages before any runtime data exists", async () => {
   await withTempHome("lightmem2-codex-cli-empty-state-", async (homeDir) => {
     const proxyPort = await reserveUnusedPort();
