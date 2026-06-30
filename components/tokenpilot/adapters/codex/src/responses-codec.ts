@@ -140,6 +140,9 @@ export function createCodexResponsesPayloadCodec(
       const payload = envelope.rawPayload && typeof envelope.rawPayload === "object"
         ? { ...(envelope.rawPayload as Record<string, unknown>) }
         : {};
+      // Codex-compatible upstreams frequently reject top-level Responses
+      // metadata, so keep it local for session resolution only.
+      delete payload.metadata;
       payload.model = envelope.model;
       payload.stream = envelope.stream;
       if (typeof envelope.instructions === "string") payload.instructions = envelope.instructions;

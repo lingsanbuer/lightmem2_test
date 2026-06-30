@@ -130,3 +130,22 @@ test("syncPayloadFromEnvelope updates managed fields in place while preserving u
   assert.equal("tools" in rawPayload, false);
   assert.equal(rawPayload.extraField, "remove-me");
 });
+
+test("codec strips top-level metadata before forwarding upstream", () => {
+  const codec = createCodexResponsesPayloadCodec();
+  const rawPayload: any = {
+    model: "tokenpilot/gpt-5.4-mini",
+    stream: false,
+    metadata: {
+      tokenpilotSyntheticSessionId: "codex-synth-1",
+      sessionId: "host-session-1",
+    },
+    input: [{ role: "user", content: "hello" }],
+  };
+
+  const envelope = codec.decodeRequest(rawPayload);
+  assert.equal(envelope.session.sessionId, "host-session-1");
+
+  const encoded = codec.encodeRequest(envelope) as any;
+  assert.equal("metadata" in encoded, false);
+});
