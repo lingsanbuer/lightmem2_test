@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { loadTokenPilotCodexConfig } from "../src/config.js";
-import { installCodexTokenPilot } from "../src/install.js";
+import { installCodexTokenPilot, resolveCodexHookCommandForInstall } from "../src/install.js";
 
 test("installCodexTokenPilot writes provider, MCP, and hooks with expected commands", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-"));
@@ -183,5 +183,54 @@ test("installCodexTokenPilot writes Windows hook wrappers into hooks.json", asyn
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("installCodexTokenPilot rewrites the MCP server block idempotently", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-mcp-idempotent-"));
+  try {
+    const codexConfigPath = join(dir, "config.toml");
+    const hooksConfigPath = join(dir, "hooks.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+    await writeFile(codexConfigPath, [
+      "model_provider = \"OPENAI\"",
+      "",
+      "[model_providers.OPENAI]",
+      "name = \"OpenAI\"",
+      "base_url = \"https://api.openai.com/v1\"",
+      "wire_api = \"responses\"",
+      "requires_openai_auth = true",
+      "",
+    ].join("\n"), "utf8");
+
+    await installCodexTokenPilot({
+      codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+    });
+    await installCodexTokenPilot({
+      codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+    });
+
+    const codexToml = await readFile(codexConfigPath, "utf8");
+    const envHeaders = codexToml.match(/\[mcp_servers\.tokenpilot_memory_fault_recover\.env\]/g) ?? [];
+    assert.equal(envHeaders.length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexHookCommandForInstall finds the adapter root from the bundled CLI tree", async () => {
+  const repoRoot = resolve(__dirname, "..", "..", "..", "..", "..");
+  const bundledCliModuleDir = join(repoRoot, "components", "tokenpilot", "products", "cli", "dist");
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(dirname(repoRoot));
+    const command = await resolveCodexHookCommandForInstall(process.platform, bundledCliModuleDir);
+    assert.match(command, /adapters[\/\\]codex[\/\\]dist[\/\\](hooks-handler\.js|tokenpilot-codex-hook\.cmd)/);
+  } finally {
+    process.chdir(originalCwd);
   }
 });

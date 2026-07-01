@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { installClaudeCodeTokenPilot } from "../src/install.js";
+import { installClaudeCodeTokenPilot, resolveClaudeCodeHookCommandForInstall } from "../src/install.js";
 
 test("installClaudeCodeTokenPilot writes settings, MCP config, and backups existing files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-install-"));
@@ -87,5 +87,18 @@ test("installClaudeCodeTokenPilot reports degraded MCP mode when probe is skippe
     assert.match(result.mcpProbe.detail, /skipped/i);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeCodeHookCommandForInstall finds the adapter root from the bundled CLI tree", async () => {
+  const repoRoot = resolve(__dirname, "..", "..", "..", "..", "..");
+  const bundledCliModuleDir = join(repoRoot, "components", "tokenpilot", "products", "cli", "dist");
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(dirname(repoRoot));
+    const command = resolveClaudeCodeHookCommandForInstall(bundledCliModuleDir);
+    assert.match(command, /adapters[\/\\]claude-code[\/\\]dist[\/\\]hooks-handler\.js/);
+  } finally {
+    process.chdir(originalCwd);
   }
 });

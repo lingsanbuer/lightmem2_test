@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -30,15 +30,47 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function adapterRootFromHere(): string {
-  const moduleDir = __dirname;
+function isClaudeCodeAdapterRoot(candidate: string): boolean {
+  const packageJsonPath = join(candidate, "package.json");
+  if (!existsSync(packageJsonPath)) return false;
+  if (!existsSync(join(candidate, "dist", "hooks-handler.js")) && !existsSync(join(candidate, "src", "hooks-handler.ts"))) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string };
+    return parsed.name === "@tokenpilot/claude-code-adapter";
+  } catch {
+    return false;
+  }
+}
+
+function adapterRootFromHere(moduleDir = __dirname): string {
   const fromDist = resolve(moduleDir, "..");
-  if (existsSync(join(fromDist, "package.json"))) {
+  if (isClaudeCodeAdapterRoot(fromDist)) {
     return fromDist;
   }
   const fromSrc = resolve(moduleDir, "..");
-  if (existsSync(join(fromSrc, "package.json"))) {
+  if (isClaudeCodeAdapterRoot(fromSrc)) {
     return fromSrc;
+  }
+  let current = resolve(moduleDir, "..");
+  for (let i = 0; i < 10; i += 1) {
+    const nested = join(current, "components", "tokenpilot", "adapters", "claude-code");
+    if (isClaudeCodeAdapterRoot(nested)) {
+      return nested;
+    }
+    current = dirname(current);
+  }
+  current = process.cwd();
+  for (let i = 0; i < 6; i += 1) {
+    if (isClaudeCodeAdapterRoot(current)) {
+      return current;
+    }
+    const nested = join(current, "components", "tokenpilot", "adapters", "claude-code");
+    if (isClaudeCodeAdapterRoot(nested)) {
+      return nested;
+    }
+    current = dirname(current);
   }
   return join(process.cwd(), "components", "tokenpilot", "adapters", "claude-code");
 }
@@ -56,8 +88,8 @@ function tokenPilotHookCommand(adapterRoot: string): string {
   return `${shellQuote(process.execPath)} --import tsx ${shellQuote(srcHandler)}`;
 }
 
-export function resolveClaudeCodeHookCommandForInstall(): string {
-  return tokenPilotHookCommand(adapterRootFromHere());
+export function resolveClaudeCodeHookCommandForInstall(moduleDir = __dirname): string {
+  return tokenPilotHookCommand(adapterRootFromHere(moduleDir));
 }
 
 export function resolveClaudeCodeMcpServerSpecForInstall(stateDir: string): TokenPilotMcpServerSpec {

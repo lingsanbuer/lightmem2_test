@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -91,40 +91,54 @@ function upsertMcpServerSection(text: string, params: {
   }
   const section = lines.join("\n");
   const escapedServer = params.serverName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const sectionRe = new RegExp(`\\n?\\[mcp_servers\\.${escapedServer}\\][\\s\\S]*?(?=\\n\\[[^\\]]+\\]|$)`);
-  if (sectionRe.test(text)) {
-    return text.replace(sectionRe, `\n${section}\n`);
+  const sectionFamilyRe = new RegExp(
+    `\\n?\\[mcp_servers\\.${escapedServer}\\](?:[\\s\\S]*?(?=\\n\\[(?!mcp_servers\\.${escapedServer}(?:\\.|\\]))[^\\]]+\\]|$))?`
+    + `(?:\\n\\[mcp_servers\\.${escapedServer}\\.[^\\]]+\\][\\s\\S]*?(?=\\n\\[(?!mcp_servers\\.${escapedServer}(?:\\.|\\]))[^\\]]+\\]|$))*`,
+  );
+  if (sectionFamilyRe.test(text)) {
+    return text.replace(sectionFamilyRe, `\n${section}\n`);
   }
   return `${text.replace(/\s*$/, "")}\n\n${section}\n`;
 }
 
-function adapterRootFromHere(): string {
-  const moduleDir = __dirname;
+function isCodexAdapterRoot(candidate: string): boolean {
+  const packageJsonPath = join(candidate, "package.json");
+  if (!existsSync(packageJsonPath)) return false;
+  if (!existsSync(join(candidate, "dist", "hooks-handler.js")) && !existsSync(join(candidate, "src", "hooks-handler.ts"))) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string };
+    return parsed.name === "@tokenpilot/codex-adapter";
+  } catch {
+    return false;
+  }
+}
+
+function adapterRootFromHere(moduleDir = __dirname): string {
   const fromDist = resolve(moduleDir, "..");
-  if (
-    existsSync(join(fromDist, "package.json"))
-    && existsSync(join(fromDist, "dist", "hooks-handler.js"))
-  ) {
+  if (isCodexAdapterRoot(fromDist)) {
     return fromDist;
   }
   const fromSrc = resolve(moduleDir, "..");
-  if (
-    existsSync(join(fromSrc, "package.json"))
-    && existsSync(join(fromSrc, "src"))
-  ) {
+  if (isCodexAdapterRoot(fromSrc)) {
     return fromSrc;
   }
-  let current = process.cwd();
+  let current = resolve(moduleDir, "..");
+  for (let i = 0; i < 10; i += 1) {
+    const nested = join(current, "components", "tokenpilot", "adapters", "codex");
+    if (isCodexAdapterRoot(nested)) {
+      return nested;
+    }
+    current = dirname(current);
+  }
+  current = process.cwd();
   for (let i = 0; i < 6; i += 1) {
-    if (
-      existsSync(join(current, "package.json"))
-      && existsSync(join(current, "src"))
-      && existsSync(join(current, "scripts"))
-    ) {
+    if (isCodexAdapterRoot(current)) {
       return current;
     }
     const nested = join(current, "components", "tokenpilot", "adapters", "codex");
-    if (existsSync(join(nested, "package.json"))) return nested;
+    if (isCodexAdapterRoot(nested)) return nested;
     current = dirname(current);
   }
   return join(process.cwd(), "components", "tokenpilot", "adapters", "codex");
@@ -160,8 +174,11 @@ async function tokenPilotHookCommand(adapterRoot: string, platform = process.pla
   return `${shellQuote(process.execPath)} ${shellQuote(hookScriptPath(adapterRoot))}`;
 }
 
-export async function resolveCodexHookCommandForInstall(platform = process.platform): Promise<string> {
-  return tokenPilotHookCommand(adapterRootFromHere(), platform);
+export async function resolveCodexHookCommandForInstall(
+  platform = process.platform,
+  moduleDir = __dirname,
+): Promise<string> {
+  return tokenPilotHookCommand(adapterRootFromHere(moduleDir), platform);
 }
 
 export function resolveCodexMcpServerSpecForInstall(stateDir: string): TokenPilotMcpServerSpec {
