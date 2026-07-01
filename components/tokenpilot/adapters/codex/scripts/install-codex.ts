@@ -11,6 +11,8 @@ installCodexTokenPilot({
   console.log(`Codex hooks config: ${result.hooksConfigPath} (${result.hooksInstalled ? "installed" : "skipped"})`);
   console.log(`Recovery MCP server: ${result.mcpServerName}`);
   console.log(`Recovery MCP startup timeout: ${result.expectedMcpStartupTimeoutSec}s`);
+  console.log(`Command skills dir: ${result.commandSkillsDir}`);
+  console.log(`Command skills: ${result.commandSkillNames.join(", ")}`);
   console.log(`Recovery MCP probe: ${result.mcpProbe.ok ? "ok" : "degraded"}`);
   console.log(`Recovery MCP probe detail: ${result.mcpProbe.detail}`);
   console.log(`Proxy base URL: ${result.baseUrl}`);

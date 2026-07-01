@@ -47,6 +47,12 @@ test("installCodexTokenPilot writes provider, MCP, and hooks with expected comma
     assert.equal(result.mcpProbe.ok, true);
     assert.equal(result.mcpProbe.degraded, false);
     assert.equal(result.activeProviderName, "OPENAI");
+    assert.deepEqual(result.commandSkillNames, [
+      "lightmem2-status",
+      "lightmem2-report",
+      "lightmem2-doctor",
+      "lightmem2-visual",
+    ]);
     const tokenPilotConfig = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
     assert.equal(tokenPilotConfig.upstreamProvider, "OPENAI");
     assert.equal(tokenPilotConfig.upstream?.baseUrl, "https://api.openai.com/v1");
@@ -59,6 +65,12 @@ test("installCodexTokenPilot writes provider, MCP, and hooks with expected comma
       assert.ok(Array.isArray(entries), `${eventName} hook group missing`);
       assert.equal(String(entries[0]?.command ?? ""), result.expectedHookCommand);
     }
+
+    const skillRaw = await readFile(join(result.commandSkillsDir, "lightmem2-report", "SKILL.md"), "utf8");
+    assert.match(skillRaw, /lightmem2 codex report/);
+    assert.match(skillRaw, /node/);
+    const policyRaw = await readFile(join(result.commandSkillsDir, "lightmem2-report", "agents", "openai.yaml"), "utf8");
+    assert.match(policyRaw, /allow_implicit_invocation:\s*false/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

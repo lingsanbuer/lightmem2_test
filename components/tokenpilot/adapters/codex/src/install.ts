@@ -18,6 +18,10 @@ import {
   readCodexRootModelProvider,
   writeTokenPilotCodexConfig,
 } from "./config.js";
+import {
+  defaultCodexSkillBridgeDir,
+  installCommandSkillBridge,
+} from "../../shared/command-skill-bridge.js";
 import { migrateCodexThreadProviders } from "./thread-providers.js";
 
 function quoteToml(value: string): string {
@@ -255,6 +259,8 @@ export async function installCodexTokenPilot(params?: {
   expectedMcpCommand: string;
   expectedMcpArgs: string[];
   expectedMcpStartupTimeoutSec: number;
+  commandSkillsDir: string;
+  commandSkillNames: string[];
   mcpProbe: {
     ok: boolean;
     detail: string;
@@ -267,6 +273,7 @@ export async function installCodexTokenPilot(params?: {
   const hooksConfigPath = params?.hooksConfigPath ?? defaultHooksConfigPath();
   const providerName = params?.providerName ?? "tokenpilot";
   const tokenPilotConfig = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
+  const commandSkillsDir = defaultCodexSkillBridgeDir(dirname(codexConfigPath));
   const existingRootProvider = await readCodexRootModelProvider(codexConfigPath);
   const preferredActiveProvider = existingRootProvider && existingRootProvider !== providerName
     ? existingRootProvider
@@ -313,6 +320,12 @@ export async function installCodexTokenPilot(params?: {
     codexHome: dirname(codexConfigPath),
     activeProviderName,
   });
+  const commandSkillBridge = await installCommandSkillBridge({
+    adapterRoot: adapterRootFromHere(),
+    skillsDir: commandSkillsDir,
+    host: "codex",
+    style: "codex",
+  });
   const expectedHookCommand = await resolveCodexHookCommandForInstall(params?.platform);
   const mcpProbeResult = params?.probeMcp === false
     ? {
@@ -339,6 +352,8 @@ export async function installCodexTokenPilot(params?: {
     expectedMcpCommand: mcpServer.command,
     expectedMcpArgs: mcpServer.args,
     expectedMcpStartupTimeoutSec: DEFAULT_TOKENPILOT_MCP_STARTUP_TIMEOUT_SEC,
+    commandSkillsDir: commandSkillBridge.skillsDir,
+    commandSkillNames: commandSkillBridge.skillNames,
     mcpProbe: {
       ...mcpProbeResult,
       degraded: !mcpProbeResult.ok,

@@ -19,6 +19,10 @@ import {
   proxyBaseUrlForPort,
   writeTokenPilotClaudeCodeConfig,
 } from "./config.js";
+import {
+  defaultClaudeCodeSkillBridgeDir,
+  installCommandSkillBridge,
+} from "../../shared/command-skill-bridge.js";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -108,6 +112,8 @@ export async function installClaudeCodeTokenPilot(params?: {
   expectedMcpCommand: string;
   expectedMcpArgs: string[];
   expectedMcpStartupTimeoutSec: number;
+  commandSkillsDir: string;
+  commandSkillNames: string[];
   mcpProbe: {
     ok: boolean;
     detail: string;
@@ -119,6 +125,7 @@ export async function installClaudeCodeTokenPilot(params?: {
   const mcpConfigPath = params?.mcpConfigPath ?? defaultClaudeCodeMcpConfigPath();
   const tokenPilotConfigPath = params?.tokenPilotConfigPath ?? defaultTokenPilotClaudeCodeConfigPath();
   const config = await loadTokenPilotClaudeCodeConfig(tokenPilotConfigPath);
+  const commandSkillsDir = defaultClaudeCodeSkillBridgeDir(settingsPath);
   await writeTokenPilotClaudeCodeConfig(config, tokenPilotConfigPath);
   const mcpServer = resolveClaudeCodeMcpServerSpecForInstall(config.stateDir);
   const mcpProbeServer = resolveClaudeCodeMcpServerSpecForProbe(config.stateDir);
@@ -175,6 +182,12 @@ export async function installClaudeCodeTokenPilot(params?: {
     await copyFile(mcpConfigPath, `${mcpConfigPath}.tokenpilot.bak`);
   }
   await writeFile(mcpConfigPath, `${JSON.stringify({ ...mcpRoot, mcpServers }, null, 2)}\n`, "utf8");
+  const commandSkillBridge = await installCommandSkillBridge({
+    adapterRoot: adapterRootFromHere(),
+    skillsDir: commandSkillsDir,
+    host: "claude-code",
+    style: "claude",
+  });
   const mcpProbe = params?.probeMcp === false
     ? {
       ok: false,
@@ -203,6 +216,8 @@ export async function installClaudeCodeTokenPilot(params?: {
     expectedMcpCommand: mcpServer.command,
     expectedMcpArgs: mcpServer.args,
     expectedMcpStartupTimeoutSec: DEFAULT_TOKENPILOT_MCP_STARTUP_TIMEOUT_SEC,
+    commandSkillsDir: commandSkillBridge.skillsDir,
+    commandSkillNames: commandSkillBridge.skillNames,
     mcpProbe: {
       ...mcpProbe,
       degraded: !mcpProbe.ok,

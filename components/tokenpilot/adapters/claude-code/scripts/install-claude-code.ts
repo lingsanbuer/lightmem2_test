@@ -16,6 +16,8 @@ async function main() {
     `- expected MCP command: ${result.expectedMcpCommand}`,
     `- expected MCP args: ${result.expectedMcpArgs.join(" ")}`,
     `- expected MCP startup timeout: ${result.expectedMcpStartupTimeoutSec}s`,
+    `- command skills dir: ${result.commandSkillsDir}`,
+    `- command skills: ${result.commandSkillNames.join(", ")}`,
     `- tool search env: ${result.toolSearchEnvName}=${result.toolSearchEnvValue}`,
     `- recovery MCP server: ${result.mcpServerName}`,
     `- recovery MCP probe: ${result.mcpProbe.ok ? "ok" : "degraded"}`,

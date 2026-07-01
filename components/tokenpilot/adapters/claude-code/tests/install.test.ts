@@ -52,11 +52,21 @@ test("installClaudeCodeTokenPilot writes settings, MCP config, and backups exist
     assert.equal(mcp.mcpServers?.tokenpilot_memory_fault_recover?.startup_timeout_sec, 90);
     assert.equal(typeof mcp.mcpServers?.existing?.command, "string");
     assert.equal(result.hooksInstalled, true);
+    assert.deepEqual(result.commandSkillNames, [
+      "lightmem2-status",
+      "lightmem2-report",
+      "lightmem2-doctor",
+      "lightmem2-visual",
+    ]);
     assert.match(result.expectedHookCommand, /hooks-handler\.(js|ts)/);
     assert.ok(result.expectedMcpArgs.length > 0);
     assert.equal(result.expectedMcpStartupTimeoutSec, 90);
     assert.equal(result.mcpProbe.ok, true);
     assert.equal(result.mcpProbe.degraded, false);
+
+    const skillRaw = await readFile(join(result.commandSkillsDir, "lightmem2-doctor", "SKILL.md"), "utf8");
+    assert.match(skillRaw, /lightmem2 claude-code doctor/);
+    assert.match(skillRaw, /disable-model-invocation:\s*true/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

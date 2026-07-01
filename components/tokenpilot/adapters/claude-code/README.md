@@ -25,12 +25,13 @@ Supported:
 - lightweight session-state and ux-effects tracking
 - text-mode `lightmem2 claude-code visual`
 - standalone `lightmem2 claude-code ...` command surface
+- local read-only Claude Code skill bridge for `status` / `report` / `doctor` / `visual`
 
 Current limitations:
 
 - lifecycle eviction controls
 - `mode aggressive`
-- in-host slash commands
+- native runtime-managed in-host commands
 - browser visual parity
 
 ## Install
@@ -63,9 +64,20 @@ The installer will:
 - enable the required tool-search environment flag
 - write TokenPilot runtime config to `~/.claude/tokenpilot.json`
 - register the shared `tokenpilot_memory_fault_recover` MCP server in `~/.claude/.claude.json`
+- install read-only Claude Code skill bridge entries under the local Claude skills directory
 - preserve existing Claude files as `.tokenpilot.bak` backups before rewriting
 - write a conservative `startup_timeout_sec` for the recovery MCP server
 - run a post-install MCP startup probe and report degraded mode if recovery MCP is still unavailable
+
+The installed Claude Code skill bridge currently creates these explicit skills:
+
+- `lightmem2-status`
+- `lightmem2-report`
+- `lightmem2-doctor`
+- `lightmem2-visual`
+
+These are host entry points, not a separate runtime implementation. They call
+the existing `lightmem2 claude-code ...` CLI surface underneath.
 
 ## Verify
 

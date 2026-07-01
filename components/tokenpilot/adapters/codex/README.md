@@ -25,13 +25,14 @@ Supported:
 - lightweight session-state tracking from proxy + hooks
 - text-mode Codex session visual via `lightmem2 codex visual`
 - standalone `lightmem2 codex ...` command surface
+- local read-only Codex skill bridge for `status` / `report` / `doctor` / `visual`
 
 Current limitations:
 
 - visual inspector payload parity
 - lifecycle-aware eviction controls
 - `mode aggressive`
-- native in-host slash commands
+- native runtime-managed in-host commands
 
 ## Install
 
@@ -65,7 +66,18 @@ The installer will:
 - write a conservative `startup_timeout_sec` for the recovery MCP server
 - write TokenPilot runtime config
 - register TokenPilot hooks for `SessionStart`, `PreToolUse`, `PostToolUse`, and `Stop`
+- install read-only Codex skill bridge entries under the local Codex skills directory
 - run a post-install MCP startup probe and report degraded mode if recovery MCP is still unavailable
+
+The installed Codex skill bridge currently creates these explicit skills:
+
+- `lightmem2-status`
+- `lightmem2-report`
+- `lightmem2-doctor`
+- `lightmem2-visual`
+
+These are host entry points, not a separate runtime implementation. They call
+the existing `lightmem2 codex ...` CLI surface underneath.
 
 ## Verify
 
