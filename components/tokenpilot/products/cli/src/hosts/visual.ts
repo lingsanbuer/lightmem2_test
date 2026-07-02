@@ -1,64 +1,27 @@
-import { existsSync } from "node:fs";
-import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
-import { spawn } from "node:child_process";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import {
   ensureMultiHostVisualServer,
+  startVisualServer,
   readVisualSessionList,
   type VisualHostSource,
 } from "@tokenpilot/product-surface";
 import { resolveCliVisualHosts } from "./registry.js";
+import {
+  ensureDetachedVisualDaemon,
+  resolveCliEntryPathFromHostModule,
+  sharedVisualLogPath,
+  sharedVisualMetaPath,
+  sharedVisualPidPath,
+  sharedVisualRootDir,
+  singleHostVisualMetaPath,
+} from "./visual-daemon.js";
 
 type MultiHostVisualMeta = {
   url?: string;
   pid?: number;
   hosts?: Array<{ hostId: string; stateDir: string }>;
 };
-
-function childProcessExecArgv(): string[] {
-  return process.execArgv.filter((arg) => arg !== "--test");
-}
-
-function visualRootDir(): string {
-  return join(homedir(), ".lightmem2", "state");
-}
-
-function visualPidPath(): string {
-  return join(visualRootDir(), "visual-server.pid");
-}
-
-function visualMetaPath(): string {
-  return join(visualRootDir(), "visual-server.json");
-}
-
-function visualLogPath(): string {
-  return join(visualRootDir(), "visual-server.log");
-}
-
-function isProcessRunning(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForVisualServer(url: string, timeoutMs = 5000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const resp = await fetch(`${url}/health`);
-      if (resp.ok) return true;
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  }
-  return false;
-}
 
 function hostSignature(hosts: VisualHostSource[]): string {
   return JSON.stringify(hosts.map((host) => ({ hostId: host.hostId, stateDir: host.stateDir })));
@@ -70,84 +33,28 @@ export async function ensureStandaloneVisualServer(): Promise<{
 }> {
   const hosts = await resolveCliVisualHosts();
   const nextSignature = hostSignature(hosts);
-  const metaFile = visualMetaPath();
-  const pidFile = visualPidPath();
-  const currentMeta = existsSync(metaFile)
-    ? JSON.parse(await readFile(metaFile, "utf8")) as MultiHostVisualMeta
-    : {};
-  const currentPid = Number(currentMeta.pid ?? 0);
-  const currentSignature = JSON.stringify(
-    Array.isArray(currentMeta.hosts)
-      ? currentMeta.hosts.map((host) => ({ hostId: host.hostId, stateDir: host.stateDir }))
-      : [],
-  );
-  if (currentMeta.url && currentPid > 0 && isProcessRunning(currentPid) && currentSignature === nextSignature) {
-    const healthy = await waitForVisualServer(currentMeta.url, 500);
-    if (healthy) {
-      return { url: currentMeta.url, hosts };
-    }
-  }
-
-  await mkdir(visualRootDir(), { recursive: true });
-  const log = await open(visualLogPath(), "a");
-  const child = spawn(process.execPath, [...childProcessExecArgv(), __filename, "__lightmem2_visual_daemon"], {
-    detached: true,
-    stdio: ["ignore", log.fd, log.fd],
-    env: process.env,
+  await mkdir(sharedVisualRootDir(), { recursive: true });
+  const url = await ensureDetachedVisualDaemon<MultiHostVisualMeta>({
+    daemonArgs: [resolveCliEntryPathFromHostModule(__filename), "__visual_daemon_multi"],
+    metaPath: sharedVisualMetaPath(),
+    pidPath: sharedVisualPidPath(),
+    logPath: sharedVisualLogPath(),
+    expectedSignature: nextSignature,
+    readSignature(meta) {
+      return JSON.stringify(
+        Array.isArray(meta?.hosts)
+          ? meta.hosts.map((host) => ({ hostId: host.hostId, stateDir: host.stateDir }))
+          : [],
+      );
+    },
+    readUrl(meta) {
+      return meta?.url;
+    },
+    readPid(meta) {
+      return meta?.pid;
+    },
   });
-  child.unref();
-  await log.close().catch(() => undefined);
-  await writeFile(pidFile, `${child.pid}\n`, "utf8");
-
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    try {
-      if (existsSync(metaFile)) {
-        const parsed = JSON.parse(await readFile(metaFile, "utf8")) as MultiHostVisualMeta;
-        const parsedSignature = JSON.stringify(
-          Array.isArray(parsed.hosts)
-            ? parsed.hosts.map((host) => ({ hostId: host.hostId, stateDir: host.stateDir }))
-            : [],
-        );
-        if (parsed.url && Number(parsed.pid) === child.pid && parsedSignature === nextSignature) {
-          const healthy = await waitForVisualServer(parsed.url, 1000);
-          if (healthy) {
-            return { url: parsed.url, hosts };
-          }
-        }
-      }
-    } catch {
-      // retry
-    }
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  }
-
-  if (isProcessRunning(child.pid ?? 0)) {
-    try {
-      process.kill(child.pid ?? 0, "SIGTERM");
-    } catch {
-      // ignore
-    }
-  }
-  await rm(pidFile, { force: true }).catch(() => undefined);
-  throw new Error("Failed to start LightMem2 standalone visual server");
-}
-
-export async function maybeRunStandaloneVisualDaemon(argv: string[]): Promise<boolean> {
-  if (argv[0] !== "__lightmem2_visual_daemon") return false;
-  const hosts = await resolveCliVisualHosts();
-  const handle = await ensureMultiHostVisualServer(hosts);
-  await mkdir(dirname(visualMetaPath()), { recursive: true });
-  await writeFile(
-    visualMetaPath(),
-    `${JSON.stringify({
-      url: handle.url,
-      pid: process.pid,
-      hosts: hosts.map(({ hostId, stateDir }) => ({ hostId, stateDir })),
-    }, null, 2)}\n`,
-    "utf8",
-  );
-  return new Promise<boolean>(() => undefined);
+  return { url, hosts };
 }
 
 export async function handleStandaloneVisualCommand(): Promise<{ text: string }> {
@@ -180,14 +87,36 @@ export async function handleStandaloneVisualCommandWithSelection(params: {
   };
 }
 
-async function runStandaloneVisualDaemonEntry(): Promise<void> {
-  if (process.argv[1] !== __filename) return;
-  if (await maybeRunStandaloneVisualDaemon(process.argv.slice(2))) {
-    return;
+export async function maybeRunVisualDaemon(argv: string[]): Promise<boolean> {
+  if (argv[0] === "__visual_daemon_multi") {
+    const hosts = await resolveCliVisualHosts();
+    const handle = await ensureMultiHostVisualServer(hosts);
+    await mkdir(dirname(sharedVisualMetaPath()), { recursive: true });
+    await writeFile(
+      sharedVisualMetaPath(),
+      `${JSON.stringify({
+        url: handle.url,
+        pid: process.pid,
+        hosts: hosts.map(({ hostId, stateDir }) => ({ hostId, stateDir })),
+      }, null, 2)}\n`,
+      "utf8",
+    );
+    return new Promise<boolean>(() => undefined);
   }
-}
 
-void runStandaloneVisualDaemonEntry().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-  process.exit(1);
-});
+  if (argv[0] === "__visual_daemon_single") {
+    const stateDir = String(argv[1] ?? "").trim();
+    if (!stateDir) {
+      throw new Error("Missing stateDir for visual daemon");
+    }
+    const handle = await startVisualServer(stateDir, { unref: false });
+    await writeFile(
+      singleHostVisualMetaPath(stateDir),
+      `${JSON.stringify({ url: handle.url, pid: process.pid, stateDir }, null, 2)}\n`,
+      "utf8",
+    );
+    return new Promise<boolean>(() => undefined);
+  }
+
+  return false;
+}

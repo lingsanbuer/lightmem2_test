@@ -1,0 +1,142 @@
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { dirname, extname, join } from "node:path";
+import { homedir } from "node:os";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
+
+function childProcessExecArgv(): string[] {
+  return process.execArgv.filter((arg) => arg !== "--test");
+}
+
+function isProcessRunning(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForVisualServer(url: string, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const resp = await fetch(`${url}/health`);
+      if (resp.ok) return true;
+    } catch {
+      // retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  return false;
+}
+
+async function readJsonMeta<TMeta>(metaPath: string): Promise<TMeta | undefined> {
+  try {
+    if (!existsSync(metaPath)) return undefined;
+    return JSON.parse(await readFile(metaPath, "utf8")) as TMeta;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveCliEntryPathFromHostModule(hostModulePath: string): string {
+  const extension = extname(hostModulePath) || ".js";
+  return join(dirname(dirname(hostModulePath)), `cli${extension}`);
+}
+
+export function sharedVisualRootDir(): string {
+  return join(homedir(), ".lightmem2", "state");
+}
+
+export function sharedVisualPidPath(): string {
+  return join(sharedVisualRootDir(), "visual-server.pid");
+}
+
+export function sharedVisualMetaPath(): string {
+  return join(sharedVisualRootDir(), "visual-server.json");
+}
+
+export function sharedVisualLogPath(): string {
+  return join(sharedVisualRootDir(), "visual-server.log");
+}
+
+export function singleHostVisualPidPath(stateDir: string): string {
+  return join(stateDir, "visual-server.pid");
+}
+
+export function singleHostVisualMetaPath(stateDir: string): string {
+  return join(stateDir, "visual-server.json");
+}
+
+export function singleHostVisualLogPath(stateDir: string): string {
+  return join(stateDir, "visual-server.log");
+}
+
+export async function ensureDetachedVisualDaemon<TMeta>(params: {
+  daemonArgs: string[];
+  metaPath: string;
+  pidPath: string;
+  logPath: string;
+  expectedSignature: string;
+  readSignature(meta: TMeta | undefined): string | undefined;
+  readUrl(meta: TMeta | undefined): string | undefined;
+  readPid(meta: TMeta | undefined): number | undefined;
+  timeoutMs?: number;
+}): Promise<string> {
+  const timeoutMs = params.timeoutMs ?? 5000;
+  const currentMeta = await readJsonMeta<TMeta>(params.metaPath);
+  const currentUrl = params.readUrl(currentMeta);
+  const currentPid = Number(params.readPid(currentMeta) ?? 0);
+  const currentSignature = params.readSignature(currentMeta);
+  if (
+    currentUrl
+    && currentPid > 0
+    && isProcessRunning(currentPid)
+    && currentSignature === params.expectedSignature
+  ) {
+    const healthy = await waitForVisualServer(currentUrl, 500);
+    if (healthy) return currentUrl;
+  }
+
+  await mkdir(dirname(params.metaPath), { recursive: true });
+  await mkdir(dirname(params.pidPath), { recursive: true });
+  await mkdir(dirname(params.logPath), { recursive: true });
+  const log = await open(params.logPath, "a");
+  const child = spawn(process.execPath, [...childProcessExecArgv(), ...params.daemonArgs], {
+    detached: true,
+    stdio: ["ignore", log.fd, log.fd],
+    env: process.env,
+  });
+  child.unref();
+  await log.close().catch(() => undefined);
+  await writeFile(params.pidPath, `${child.pid}\n`, "utf8");
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const parsed = await readJsonMeta<TMeta>(params.metaPath);
+    const parsedUrl = params.readUrl(parsed);
+    const parsedPid = Number(params.readPid(parsed) ?? 0);
+    const parsedSignature = params.readSignature(parsed);
+    if (
+      parsedUrl
+      && parsedPid === child.pid
+      && parsedSignature === params.expectedSignature
+    ) {
+      const healthy = await waitForVisualServer(parsedUrl, 1000);
+      if (healthy) return parsedUrl;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+
+  if (isProcessRunning(child.pid ?? 0)) {
+    try {
+      process.kill(child.pid ?? 0, "SIGTERM");
+    } catch {
+      // ignore
+    }
+  }
+  await rm(params.pidPath, { force: true }).catch(() => undefined);
+  throw new Error(`Failed to start visual daemon for ${params.expectedSignature}`);
+}
