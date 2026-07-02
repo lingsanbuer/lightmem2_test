@@ -138,6 +138,57 @@ test("installCodexTokenPilot preserves an existing custom root provider and rero
   }
 });
 
+test("installCodexTokenPilot preserves the last real upstream when the current provider already points at an older local proxy", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-loopback-upstream-"));
+  try {
+    const codexConfigPath = join(dir, "config.toml");
+    const hooksConfigPath = join(dir, "hooks.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+
+    await writeTokenPilotCodexConfig(
+      normalizeTokenPilotCodexConfig({
+        proxyPort: 17668,
+        providerName: "OPENAI",
+        upstreamProvider: "OPENAI",
+        upstream: {
+          name: "OPENAI",
+          baseUrl: "http://47.88.93.22:10001",
+          wireApi: "responses",
+          requiresOpenAIAuth: true,
+        },
+      }),
+      tokenPilotConfigPath,
+    );
+
+    await writeFile(codexConfigPath, [
+      "model_provider = \"OPENAI\"",
+      "",
+      "[model_providers.OPENAI]",
+      "name = \"OPENAI\"",
+      "base_url = \"http://127.0.0.1:17667/v1\"",
+      "wire_api = \"responses\"",
+      "requires_openai_auth = true",
+      "",
+    ].join("\n"), "utf8");
+
+    const result = await installCodexTokenPilot({
+      codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+      probeMcp: false,
+    });
+
+    const tokenPilotConfig = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
+    assert.equal(tokenPilotConfig.upstream?.baseUrl, "http://47.88.93.22:10001");
+    assert.equal(result.providerName, "OPENAI");
+
+    const codexToml = await readFile(codexConfigPath, "utf8");
+    assert.match(codexToml, new RegExp(`base_url = "http://127\\.0\\.0\\.1:${tokenPilotConfig.proxyPort}/v1"`));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("installCodexTokenPilot writes Windows hook wrappers into hooks.json", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-win-hook-"));
   try {

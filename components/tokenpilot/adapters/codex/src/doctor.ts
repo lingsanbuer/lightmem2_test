@@ -34,6 +34,8 @@ export type CodexDoctorReport = {
   proxyHealthy: boolean;
   stateDir: string;
   upstreamProvider?: string;
+  upstreamLoopDetected: boolean;
+  upstreamBaseUrl?: string;
   mcpInstalled: boolean;
   mcpStateDirMatches: boolean;
   mcpCommandMatches: boolean;
@@ -51,6 +53,14 @@ const HOOK_EVENT_NAMES = [
   "PostToolUse",
   "Stop",
 ] as const;
+
+function normalizeLocalProxyBaseUrl(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  const match = /^http:\/\/127\.0\.0\.1:(\d+)\/v1$/i.exec(trimmed);
+  if (!match) return undefined;
+  return `http://127.0.0.1:${match[1]}/v1`;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -123,6 +133,8 @@ export function formatCodexDoctorReport(report: CodexDoctorReport): string {
     `- proxy healthy: ${report.proxyHealthy ? "yes" : "no"}`,
     `- proxy base URL: ${report.proxyBaseUrl}`,
     `- upstream provider: ${report.upstreamProvider ?? "(unset)"}`,
+    `- upstream base URL: ${report.upstreamBaseUrl ?? "(unset)"}`,
+    `- upstream loops into local proxy: ${report.upstreamLoopDetected ? "yes" : "no"}`,
   ];
   const fixes: string[] = [];
   if (!report.providerInstalled) {
@@ -133,6 +145,10 @@ export function formatCodexDoctorReport(report: CodexDoctorReport): string {
   }
   if (report.providerInstalled && report.providerActive && !report.providerIntercepted) {
     fixes.push("- rerun the Codex install command or repoint the active provider `base_url` to the local TokenPilot proxy");
+  }
+  if (report.upstreamLoopDetected) {
+    fixes.push("- stop all TokenPilot Codex proxy processes, restore `tokenpilot.json` upstream to the real remote API base URL, then restart the daemon");
+    fixes.push("- rerun the Codex install command after the daemon is stopped so the intercepted provider is not captured as the upstream provider");
   }
   if (!report.hooksInstalled || !report.hooksComplete || !report.hooksMatchExpectedCommand) {
     fixes.push("- rerun the Codex install command to repair TokenPilot hook groups in `hooks.json`");
@@ -197,6 +213,11 @@ export async function inspectCodexDoctor(params: {
   const hooksMatchExpectedCommand = HOOK_EVENT_NAMES.every((name) => matchedHookEvents.includes(name));
   const proxyHealthy = await checkHealth(proxyBaseUrl);
   const providerIntercepted = tokenpilotProvider?.baseUrl === proxyBaseUrl;
+  const upstreamBaseUrl = params.config.upstream?.baseUrl
+    ?? (params.config.upstreamProvider
+      ? (await readCodexProviderFromToml(params.config.upstreamProvider, params.configPath))?.baseUrl
+      : undefined);
+  const upstreamLoopDetected = Boolean(normalizeLocalProxyBaseUrl(upstreamBaseUrl));
   const mcpHealth = inspectTokenPilotMcpHealth({
     observed: mcp,
     expected: expectedMcpSpec,
@@ -225,6 +246,8 @@ export async function inspectCodexDoctor(params: {
     proxyHealthy,
     stateDir: params.config.stateDir,
     upstreamProvider: params.config.upstreamProvider,
+    upstreamLoopDetected,
+    upstreamBaseUrl,
     mcpInstalled: mcpHealth.installed,
     mcpStateDirMatches: mcpHealth.stateDirMatches,
     mcpCommandMatches: mcpHealth.commandMatches,

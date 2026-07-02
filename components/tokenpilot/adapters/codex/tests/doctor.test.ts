@@ -340,6 +340,56 @@ test("inspectCodexDoctor rejects a healthy response from a different adapter on 
   }
 });
 
+test("inspectCodexDoctor detects when tokenpilot upstream loops into another local proxy", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-doctor-upstream-loop-"));
+  try {
+    const proxyPort = await reserveUnusedPort();
+    const codexConfigPath = join(dir, "config.toml");
+    const hooksConfigPath = join(dir, "hooks.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+
+    await writeFile(codexConfigPath, [
+      "model_provider = \"OPENAI\"",
+      "",
+      "[model_providers.OPENAI]",
+      `name = ${JSON.stringify("OPENAI")}`,
+      `base_url = ${JSON.stringify(`http://127.0.0.1:${proxyPort}/v1`)}`,
+      "wire_api = \"responses\"",
+      "requires_openai_auth = true",
+      "",
+    ].join("\n"), "utf8");
+    await writeFile(hooksConfigPath, JSON.stringify({ hooks: {} }, null, 2), "utf8");
+    await mkdir(join(dir, "state"), { recursive: true });
+
+    const report = await inspectCodexDoctor({
+      config: normalizeTokenPilotCodexConfig({
+        stateDir: join(dir, "state"),
+        proxyPort,
+        providerName: "OPENAI",
+        upstreamProvider: "OPENAI",
+        upstream: {
+          name: "OPENAI",
+          baseUrl: "http://127.0.0.1:17667/v1",
+          wireApi: "responses",
+          requiresOpenAIAuth: true,
+        },
+      }),
+      configPath: codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+    });
+
+    assert.equal(report.upstreamLoopDetected, true);
+    assert.equal(report.upstreamBaseUrl, "http://127.0.0.1:17667/v1");
+
+    const text = formatCodexDoctorReport(report);
+    assert.match(text, /upstream loops into local proxy: yes/);
+    assert.match(text, /restore `tokenpilot\.json` upstream to the real remote API base URL/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("formatCodexDoctorReport includes remediation hints for drifted installs", async () => {
   const proxyPort = await reserveUnusedPort();
   const report = await inspectCodexDoctor({
@@ -377,6 +427,8 @@ test("formatCodexDoctorReport shows degraded mode when core runtime is healthy b
     proxyHealthy: true,
     stateDir: "/tmp/state",
     upstreamProvider: "OpenAI",
+    upstreamLoopDetected: false,
+    upstreamBaseUrl: "https://api.openai.com/v1",
     mcpInstalled: true,
     mcpStateDirMatches: true,
     mcpCommandMatches: true,

@@ -14,6 +14,7 @@ import {
   defaultCodexConfigPath,
   defaultHooksConfigPath,
   defaultTokenPilotConfigPath,
+  type CodexProviderConfig,
   loadTokenPilotCodexConfig,
   readCodexProviderFromToml,
   readCodexRootModelProvider,
@@ -191,6 +192,18 @@ function shellQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
 
+function normalizeLocalProxyBaseUrl(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  const match = /^http:\/\/127\.0\.0\.1:(\d+)\/v1$/i.exec(trimmed);
+  if (!match) return undefined;
+  return `http://127.0.0.1:${match[1]}/v1`;
+}
+
+function isLoopbackProxyProvider(provider: CodexProviderConfig | undefined): boolean {
+  return Boolean(normalizeLocalProxyBaseUrl(provider?.baseUrl));
+}
+
 async function canListenOnPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
@@ -364,15 +377,16 @@ export async function installCodexTokenPilot(params?: {
     || "OpenAI");
   const interceptedProvider = await readCodexProviderFromToml(providerName, codexConfigPath);
   const previousProxyBaseUrl = `http://127.0.0.1:${previousProxyPort}/v1`;
+  const existingInterceptedProxyBaseUrl = normalizeLocalProxyBaseUrl(interceptedProvider?.baseUrl);
   const providerAlreadyRouted = tokenPilotConfig.providerName === providerName
     && interceptedProvider?.baseUrl === previousProxyBaseUrl
     && Boolean(tokenPilotConfig.upstream?.baseUrl);
-  const upstreamProvider = providerAlreadyRouted
+  const upstreamProvider = providerAlreadyRouted || isLoopbackProxyProvider(interceptedProvider)
     ? tokenPilotConfig.upstream
     : interceptedProvider;
   tokenPilotConfig.providerName = providerName;
   tokenPilotConfig.upstreamProvider = providerName;
-  if (upstreamProvider?.baseUrl) {
+  if (upstreamProvider?.baseUrl && !isLoopbackProxyProvider(upstreamProvider)) {
     tokenPilotConfig.upstream = upstreamProvider;
   }
   await writeTokenPilotCodexConfig(tokenPilotConfig, tokenPilotConfigPath);
