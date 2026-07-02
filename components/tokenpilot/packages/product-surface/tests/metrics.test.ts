@@ -20,6 +20,9 @@ test("readRecentReductionMetrics aggregates recent route and pass metrics from h
           routeSavedChars: { code_like: 300, readme_doc: 100 },
           routeHitCount: { code_like: 2, readme_doc: 1 },
           passSavedChars: { tool_payload_trim: 350 },
+          recoveryObservedSegments: 1,
+          recoverySkippedSegments: 1,
+          skippedReason: "below_trigger_min_chars",
         },
       }),
       JSON.stringify({
@@ -28,6 +31,9 @@ test("readRecentReductionMetrics aggregates recent route and pass metrics from h
           routeSavedChars: { code_like: 200, task_doc: 150 },
           routeHitCount: { code_like: 1, task_doc: 1 },
           passSavedChars: { tool_payload_trim: 250, read_state_compaction: 100 },
+          recoveryObservedSegments: 2,
+          recoverySkippedSegments: 2,
+          skippedReasons: ["pipeline_no_effect"],
         },
       }),
       JSON.stringify({
@@ -47,6 +53,38 @@ test("readRecentReductionMetrics aggregates recent route and pass metrics from h
     assert.equal(metrics?.routeHitCount.code_like, 3);
     assert.equal(metrics?.passSavedChars.tool_payload_trim, 600);
     assert.equal(metrics?.passSavedChars.read_state_compaction, 100);
+    assert.equal(metrics?.recoveryObservedSegments, 3);
+    assert.equal(metrics?.recoverySkippedSegments, 3);
+    assert.equal(metrics?.skippedReasons.below_trigger_min_chars, 1);
+    assert.equal(metrics?.skippedReasons.pipeline_no_effect, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("readRecentReductionMetrics falls back to namespaced history paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tokenpilot-metrics-namespaced-"));
+  try {
+    const historyDir = join(root, "tokenpilot", "ux-effects");
+    await mkdir(historyDir, { recursive: true });
+    await writeFile(join(historyDir, "history.jsonl"), [
+      JSON.stringify({
+        sessionId: "sess-ns",
+        details: {
+          routeSavedChars: { search_results: 220 },
+          routeHitCount: { search_results: 2 },
+          passSavedChars: { tool_payload_trim: 220 },
+          recoveryObservedSegments: 1,
+          recoverySkippedSegments: 1,
+        },
+      }),
+    ].join("\n"));
+
+    const metrics = await readRecentReductionMetrics(root, "sess-ns");
+    assert.ok(metrics);
+    assert.equal(metrics?.routeSavedChars.search_results, 220);
+    assert.equal(metrics?.recoveryObservedSegments, 1);
+    assert.equal(metrics?.recoverySkippedSegments, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -54,6 +92,7 @@ test("readRecentReductionMetrics aggregates recent route and pass metrics from h
 
 test("formatSessionReport includes recent route and pass metrics when provided", () => {
   const text = formatSessionReport({
+    title: "TokenPilot Codex report:",
     sessionId: "sess-1",
     aggregate: {
       turns: 6,
@@ -86,10 +125,25 @@ test("formatSessionReport includes recent route and pass metrics when provided",
         tool_payload_trim: 1000,
         read_state_compaction: 200,
       },
+      recoveryObservedSegments: 3,
+      recoverySkippedSegments: 3,
+      skippedReasons: {
+        below_trigger_min_chars: 2,
+        pipeline_no_effect: 1,
+      },
     },
+    overview: [
+      { label: "Session", value: "sess-1" },
+      { label: "Model", value: "gpt-5.4" },
+    ],
   });
 
+  assert.match(text, /^Session: sess-1/m);
+  assert.match(text, /^Model: gpt-5\.4/m);
+  assert.match(text, /TokenPilot Codex report:/);
   assert.match(text, /recent sampled turns: 3/);
   assert.match(text, /recent top routes: code_like=900 chars\/4 hits, task_doc=300 chars\/1 hits/);
   assert.match(text, /recent top passes: tool_payload_trim=1,000 chars, read_state_compaction=200 chars/);
+  assert.match(text, /recent recovery segments: observed=3, exempted=3/);
+  assert.match(text, /recent skipped reasons: below_trigger_min_chars=2, pipeline_no_effect=1/);
 });

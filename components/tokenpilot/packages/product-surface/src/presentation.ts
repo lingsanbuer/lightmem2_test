@@ -33,6 +33,14 @@ export type ProductSurfaceRecentReductionMetrics = {
   routeSavedChars: Record<string, number>;
   routeHitCount: Record<string, number>;
   passSavedChars: Record<string, number>;
+  recoveryObservedSegments: number;
+  recoverySkippedSegments: number;
+  skippedReasons: Record<string, number>;
+};
+
+export type ProductSurfaceSessionOverviewItem = {
+  label: string;
+  value: string | number;
 };
 
 export function formatTokenPilotHelp(section?: string): string {
@@ -231,13 +239,15 @@ export function summarizeEvictionStatus(
 }
 
 export function formatSessionReport(params: {
+  title?: string;
   sessionId: string;
   aggregate: ProductSurfaceSessionAggregate;
   latest?: ProductSurfaceLatestUxEffect | null;
   detailsEnabled: boolean;
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
+  overview?: ProductSurfaceSessionOverviewItem[];
 }): string {
-  const { sessionId, aggregate, latest, detailsEnabled, recentMetrics } = params;
+  const { title, sessionId, aggregate, latest, detailsEnabled, recentMetrics, overview } = params;
   const latestCountMode = latest?.countMode ?? aggregate.latestCountMode ?? "litellm_tokens";
   const unitLabel = countModeLabel(latestCountMode);
   const savedCount = latestCountMode === "chars" ? aggregate.charSavedCount : aggregate.tokenSavedCount;
@@ -246,7 +256,8 @@ export function formatSessionReport(params: {
     ? aggregate.avgSavedCharsPerOptimizedTurn
     : aggregate.avgSavedTokensPerOptimizedTurn;
   const lines = [
-    "TokenPilot report:",
+    ...(overview ?? []).map((item) => `${item.label}: ${item.value}`),
+    title ?? "TokenPilot report:",
     `- session: ${sessionId}`,
     `- saved ${unitLabel}: ${formatInt(savedCount)}`,
     `- recorded turns: ${formatInt(aggregate.turns)}`,
@@ -272,9 +283,20 @@ export function formatSessionReport(params: {
         .slice(0, 3)
         .map(([pass, saved]) => `${pass}=${formatInt(saved)} ${unitLabel}`)
         .join(", ");
+      const skippedReasons = Object.entries(recentMetrics.skippedReasons)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([reason, count]) => `${reason}=${formatInt(count)}`)
+        .join(", ");
       lines.push(`- recent sampled turns: ${formatInt(recentMetrics.sampledTurns)}`);
       if (topRoutes) lines.push(`- recent top routes: ${topRoutes}`);
       if (topPasses) lines.push(`- recent top passes: ${topPasses}`);
+      if (recentMetrics.recoveryObservedSegments > 0 || recentMetrics.recoverySkippedSegments > 0) {
+        lines.push(
+          `- recent recovery segments: observed=${formatInt(recentMetrics.recoveryObservedSegments)}, exempted=${formatInt(recentMetrics.recoverySkippedSegments)}`,
+        );
+      }
+      if (skippedReasons) lines.push(`- recent skipped reasons: ${skippedReasons}`);
     }
   }
 

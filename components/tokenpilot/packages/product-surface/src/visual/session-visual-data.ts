@@ -22,6 +22,9 @@ export type ReductionVisualSnapshot = {
   toolName?: string;
   dataPath?: string;
   savedChars: number;
+  route?: string;
+  routeReason?: string;
+  passSavedChars?: Record<string, number>;
   beforeText: string;
   afterText: string;
   report: Array<{
@@ -35,6 +38,21 @@ export type ReductionVisualSnapshot = {
     afterChars?: number;
     touchedSegmentIds?: string[];
   }>;
+};
+
+export type VisualUxAggregate = {
+  turns?: number;
+  latestCountMode?: string;
+  tokenOptimizedTurns?: number;
+  tokenSavedCount?: number;
+  avgSavedTokensPerOptimizedTurn?: number;
+  charOptimizedTurns?: number;
+  charSavedCount?: number;
+  avgSavedCharsPerOptimizedTurn?: number;
+  passSavedChars?: Record<string, number>;
+  routeSavedChars?: Record<string, number>;
+  routeHitCount?: Record<string, number>;
+  latestAt?: string;
 };
 
 export type StabilityVisualSnapshot = {
@@ -85,6 +103,7 @@ export type VisualSessionData = {
   stability: StabilityVisualSnapshot[];
   reduction: ReductionVisualSnapshot[];
   eviction: EvictionVisualSnapshot[];
+  uxAggregate?: VisualUxAggregate | null;
 };
 
 function encodeSessionId(sessionId: string): string {
@@ -145,6 +164,22 @@ async function readSnapshotFile<T>(paths: string[]): Promise<T[]> {
   return [];
 }
 
+async function readJsonFile<T>(paths: string[]): Promise<T | null> {
+  for (const path of paths) {
+    try {
+      const raw = await readFile(path, "utf8");
+      return JSON.parse(raw) as T;
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+function uxAggregateCandidates(stateDir: string, sessionId: string): string[] {
+  return pluginStateSubdirCandidates(stateDir, "ux-effects", "sessions", `${sessionId}.json`);
+}
+
 async function listSnapshotFiles(stateDir: string, kind: "stability" | "reduction" | "eviction"): Promise<string[]> {
   for (const dir of snapshotDirCandidates(stateDir, kind)) {
     try {
@@ -185,11 +220,13 @@ export async function readVisualSessionData(stateDir: string, sessionId: string)
   const stability = sortByAtDesc(await readSnapshotFile<StabilityVisualSnapshot>(snapshotCandidates(stateDir, "stability", sessionId)));
   const reduction = sortByAtDesc(await readSnapshotFile<ReductionVisualSnapshot>(snapshotCandidates(stateDir, "reduction", sessionId)));
   const eviction = sortByAtDesc(await readSnapshotFile<EvictionVisualSnapshot>(snapshotCandidates(stateDir, "eviction", sessionId)));
+  const uxAggregate = await readJsonFile<VisualUxAggregate>(uxAggregateCandidates(stateDir, sessionId));
   return {
     sessionId,
     stability,
     reduction,
     eviction,
+    uxAggregate,
   };
 }
 
