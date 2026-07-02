@@ -157,7 +157,7 @@ Notes:
 
 - `lightmem2 visual` opens the shared browser visual surface and can switch hosts from the sidebar
 - `lightmem2 openclaw visual` remains the OpenClaw-scoped browser visual entrypoint
-- `lightmem2 codex visual` and `lightmem2 claude-code visual` currently remain text-mode session visuals
+- `lightmem2 codex visual` and `lightmem2 claude-code visual` now open the shared browser visual preselected to that host and session
 
 ### Stabilizer
 

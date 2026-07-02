@@ -11,8 +11,16 @@ import { indexCodexHostSessionAlias } from "../src/session-state.js";
 test("codex cli bridge exposes only the supported Codex command surface", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-bridge-"));
   const originalHome = process.env.HOME;
+  const originalConfigPath = process.env.OPENCLAW_CONFIG_PATH;
   process.env.HOME = dir;
+  process.env.OPENCLAW_CONFIG_PATH = join(dir, ".openclaw", "openclaw.json");
   try {
+    await mkdir(join(dir, ".openclaw"), { recursive: true });
+    await writeFile(
+      process.env.OPENCLAW_CONFIG_PATH!,
+      `${JSON.stringify({ plugins: { entries: {} } }, null, 2)}\n`,
+      "utf8",
+    );
     const { handleCommand } = createCodexCliBridge({ host: "codex" });
 
     const status = await handleCommand({ args: "status" });
@@ -34,7 +42,8 @@ test("codex cli bridge exposes only the supported Codex command surface", async 
     assert.match(doctor.text, /TokenPilot Codex doctor:/);
 
     const visual = await handleCommand({ args: "visual" });
-    assert.equal(visual.text, "No Codex TokenPilot session data found.");
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=codex/);
 
     const report = await handleCommand({ args: "report" });
     assert.equal(report.text, "No TokenPilot session stats yet.");
@@ -59,18 +68,35 @@ test("codex cli bridge exposes only the supported Codex command surface", async 
     } else {
       process.env.HOME = originalHome;
     }
+    if (originalConfigPath === undefined) {
+      delete process.env.OPENCLAW_CONFIG_PATH;
+    } else {
+      process.env.OPENCLAW_CONFIG_PATH = originalConfigPath;
+    }
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("codex cli bridge visual renders tracked session state", async () => {
+test("codex cli bridge visual opens the shared browser visual pinned to the codex session", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-bridge-visual-"));
   const originalHome = process.env.HOME;
+  const originalConfigPath = process.env.OPENCLAW_CONFIG_PATH;
   process.env.HOME = dir;
+  process.env.OPENCLAW_CONFIG_PATH = join(dir, ".openclaw", "openclaw.json");
   try {
     const stateDir = join(dir, ".codex", "tokenpilot-state", "tokenpilot");
+    const claudeStateDir = join(dir, ".claude", "tokenpilot-state", "tokenpilot");
+    await mkdir(join(stateDir, "visual", "reduction"), { recursive: true });
+    await mkdir(join(claudeStateDir, "visual", "reduction"), { recursive: true });
     await mkdir(join(stateDir, "session-state", "sessions"), { recursive: true });
     await mkdir(join(stateDir, "session-state", "bindings"), { recursive: true });
+    await mkdir(join(dir, ".openclaw"), { recursive: true });
+    await mkdir(join(dir, ".claude"), { recursive: true });
+    await writeFile(
+      process.env.OPENCLAW_CONFIG_PATH!,
+      `${JSON.stringify({ plugins: { entries: {} } }, null, 2)}\n`,
+      "utf8",
+    );
     await writeFile(
       join(stateDir, "session-state", "latest.json"),
       JSON.stringify({ sessionId: "session-1", updatedAt: "2026-06-26T10:00:00.000Z" }, null, 2),
@@ -126,15 +152,20 @@ test("codex cli bridge visual renders tracked session state", async () => {
 
     const { handleCommand } = createCodexCliBridge({ host: "codex" });
     const visual = await handleCommand({ args: "visual" });
-    assert.match(visual.text, /TokenPilot Codex visual:/);
-    assert.match(visual.text, /session: session-1/);
-    assert.match(visual.text, /workspace: \/repo\/demo/);
-    assert.match(visual.text, /response chain: resp-3 -> resp-2/);
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=codex/);
+    assert.match(visual.text, /session=session-1/);
+    assert.match(visual.text, /Codex: 0 session snapshots/);
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalConfigPath === undefined) {
+      delete process.env.OPENCLAW_CONFIG_PATH;
+    } else {
+      process.env.OPENCLAW_CONFIG_PATH = originalConfigPath;
     }
     await rm(dir, { recursive: true, force: true });
   }

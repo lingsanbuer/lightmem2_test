@@ -28,7 +28,6 @@ import {
   resolveCanonicalCodexSessionId,
   resolveLatestCodexSessionId,
 } from "../../../../adapters/codex/src/session-state.js";
-import { renderCodexSessionVisual } from "../../../../adapters/codex/src/session-visual.js";
 import {
   applyStandardRuntimeModeConfig,
   buildSessionReportResult,
@@ -36,6 +35,7 @@ import {
   resolveConfiguredPreferredSessionId,
   resolvePreferredSessionId,
 } from "./shared.js";
+import { handleStandaloneVisualCommandWithSelection } from "./visual.js";
 
 const CODEX_REDUCTION_PASS_NAMES = [
   "readStateCompaction",
@@ -136,9 +136,10 @@ export function createCodexCliBridge(target: {
         currentConfig,
         explicitSessionId: target.sessionId,
       });
-      return {
-        text: await renderCodexSessionVisual(stateDir, sessionId),
-      };
+      return handleStandaloneVisualCommandWithSelection({
+        host: "codex",
+        sessionId,
+      });
     },
     async handleReport(_ctx, currentConfig) {
       const sessionId = await resolveCodexCliSessionId({

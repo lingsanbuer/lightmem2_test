@@ -28,7 +28,7 @@ Legend:
 | Real MCP-backed `memory_fault_recover` | yes | yes | yes |
 | Standalone `lightmem2 <host> ...` CLI | yes | yes | yes |
 | `status` / `doctor` / `report` | yes | yes | yes |
-| `visual` | yes | partial | partial |
+| `visual` | yes | yes | yes |
 | `mode conservative` / `mode normal` | yes | yes | yes |
 | `mode aggressive` | yes | no | no |
 | Lifecycle eviction controls | yes | no | no |
@@ -50,21 +50,21 @@ Legend:
 - uses Codex config mutation, hook registration, and a local OpenAI-compatible Responses proxy
 - preserves the current active Codex provider name and reroutes that provider's `base_url` through the local proxy
 - uses the standalone `lightmem2 codex ...` CLI surface instead of in-host slash commands
-- supports stable-prefix, reduction, report, doctor, text visual, and real MCP recovery
+- supports stable-prefix, reduction, report, doctor, browser visual, and real MCP recovery
 - intentionally does not expose `settings`, `eviction`, or `mode aggressive`
 
 ### Claude Code
 
 - uses local Anthropic-compatible gateway routing plus lightweight hooks for observability
 - uses the standalone `lightmem2 claude-code ...` CLI surface instead of in-host slash commands
-- supports stable-prefix, reduction, report, doctor, text visual, and real MCP recovery
+- supports stable-prefix, reduction, report, doctor, browser visual, and real MCP recovery
 - intentionally does not expose `settings`, `eviction`, or `mode aggressive`
 
 ### Shared Visual Surface
 
 - `lightmem2 visual` now provides a standalone browser visual entrypoint
 - the shared visual can switch between `openclaw`, `codex`, and `claude-code` hosts
-- today, the browser visual is backed by snapshot data; OpenClaw has the richest dataset, while Codex and Claude Code still primarily expose text-mode `visual` through their host commands
+- today, the browser visual is backed by snapshot data; OpenClaw still has the richest dataset, while Codex and Claude Code now route their `visual` commands into the shared browser surface
 
 ## Boundary
 

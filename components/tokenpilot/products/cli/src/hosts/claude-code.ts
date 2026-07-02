@@ -28,7 +28,6 @@ import {
   resolveClaudeCodeStateDir,
 } from "../../../../adapters/claude-code/src/host-config-adapter.js";
 import { resolveLatestClaudeCodeSessionId } from "../../../../adapters/claude-code/src/session-state.js";
-import { renderClaudeCodeSessionVisual } from "../../../../adapters/claude-code/src/session-visual.js";
 import {
   applyStandardRuntimeModeConfig,
   buildSessionReportResult,
@@ -36,6 +35,7 @@ import {
   resolveConfiguredPreferredSessionId,
   resolvePreferredSessionId,
 } from "./shared.js";
+import { handleStandaloneVisualCommandWithSelection } from "./visual.js";
 
 const CLAUDE_REDUCTION_PASS_NAMES = [
   "readStateCompaction",
@@ -120,9 +120,10 @@ export function createClaudeCodeCliBridge(target: {
         resolveLatestSessionId: resolveLatestClaudeCodeSessionId,
         readLatestUxEffect,
       });
-      return {
-        text: await renderClaudeCodeSessionVisual(stateDir, sessionId),
-      };
+      return handleStandaloneVisualCommandWithSelection({
+        host: "claude-code",
+        sessionId,
+      });
     },
     async handleReport(_ctx, currentConfig) {
       return buildSessionReportResult({

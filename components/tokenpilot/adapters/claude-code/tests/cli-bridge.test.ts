@@ -13,8 +13,16 @@ import {
 test("claude-code cli bridge exposes only the supported Claude Code command surface", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-bridge-"));
   const originalHome = process.env.HOME;
+  const originalConfigPath = process.env.OPENCLAW_CONFIG_PATH;
   process.env.HOME = dir;
+  process.env.OPENCLAW_CONFIG_PATH = join(dir, ".openclaw", "openclaw.json");
   try {
+    await mkdir(join(dir, ".openclaw"), { recursive: true });
+    await writeFile(
+      process.env.OPENCLAW_CONFIG_PATH!,
+      `${JSON.stringify({ plugins: { entries: {} } }, null, 2)}\n`,
+      "utf8",
+    );
     const { handleCommand } = createClaudeCodeCliBridge({ host: "claude-code" });
 
     const status = await handleCommand({ args: "status" });
@@ -36,7 +44,8 @@ test("claude-code cli bridge exposes only the supported Claude Code command surf
     assert.match(doctor.text, /TokenPilot Claude Code doctor:/);
 
     const visual = await handleCommand({ args: "visual" });
-    assert.equal(visual.text, "No Claude Code TokenPilot session data found.");
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=claude-code/);
 
     const report = await handleCommand({ args: "report" });
     assert.equal(report.text, "No TokenPilot session stats yet.");
@@ -61,18 +70,35 @@ test("claude-code cli bridge exposes only the supported Claude Code command surf
     } else {
       process.env.HOME = originalHome;
     }
+    if (originalConfigPath === undefined) {
+      delete process.env.OPENCLAW_CONFIG_PATH;
+    } else {
+      process.env.OPENCLAW_CONFIG_PATH = originalConfigPath;
+    }
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("claude-code cli bridge visual renders tracked session state", async () => {
+test("claude-code cli bridge visual opens the shared browser visual pinned to the Claude session", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-bridge-visual-"));
   const originalHome = process.env.HOME;
+  const originalConfigPath = process.env.OPENCLAW_CONFIG_PATH;
   process.env.HOME = dir;
+  process.env.OPENCLAW_CONFIG_PATH = join(dir, ".openclaw", "openclaw.json");
   try {
     const stateDir = join(dir, ".claude", "tokenpilot-state", "tokenpilot");
+    const codexStateDir = join(dir, ".codex", "tokenpilot-state", "tokenpilot");
+    await mkdir(join(stateDir, "visual", "reduction"), { recursive: true });
+    await mkdir(join(codexStateDir, "visual", "reduction"), { recursive: true });
     await mkdir(join(stateDir, "session-state", "sessions"), { recursive: true });
     await mkdir(join(stateDir, "session-state", "bindings"), { recursive: true });
+    await mkdir(join(dir, ".openclaw"), { recursive: true });
+    await mkdir(join(dir, ".codex"), { recursive: true });
+    await writeFile(
+      process.env.OPENCLAW_CONFIG_PATH!,
+      `${JSON.stringify({ plugins: { entries: {} } }, null, 2)}\n`,
+      "utf8",
+    );
     await writeFile(
       join(stateDir, "session-state", "latest.json"),
       JSON.stringify({ sessionId: "session-1", updatedAt: "2026-06-26T10:00:00.000Z" }, null, 2),
@@ -132,16 +158,20 @@ test("claude-code cli bridge visual renders tracked session state", async () => 
 
     const { handleCommand } = createClaudeCodeCliBridge({ host: "claude-code" });
     const visual = await handleCommand({ args: "visual" });
-    assert.match(visual.text, /TokenPilot Claude Code visual:/);
-    assert.match(visual.text, /session: session-1/);
-    assert.match(visual.text, /workspace: \/repo\/demo/);
-    assert.match(visual.text, /response chain: msg-3 -> msg-2/);
-    assert.match(visual.text, /latest reduction savings: 880/);
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=claude-code/);
+    assert.match(visual.text, /session=session-1/);
+    assert.match(visual.text, /Claude Code: 0 session snapshots/);
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalConfigPath === undefined) {
+      delete process.env.OPENCLAW_CONFIG_PATH;
+    } else {
+      process.env.OPENCLAW_CONFIG_PATH = originalConfigPath;
     }
     await rm(dir, { recursive: true, force: true });
   }

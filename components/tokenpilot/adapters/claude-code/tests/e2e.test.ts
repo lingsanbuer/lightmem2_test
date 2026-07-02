@@ -186,12 +186,12 @@ test("Claude Code host e2e wires install, gateway reduction, report/visual, and 
         optimizedTurns: 1,
       },
       visual: {
-        header: "TokenPilot Claude Code visual:",
+        header: "LightMem2 visual:",
         sessionId: "sess-e2e-1",
         requiredPatterns: [
-          /workspace: \/repo\/demo/,
-          /latest response: msg_e2e_1/,
-          /latest reduction savings:/,
+          /host=claude-code/,
+          /session=sess-e2e-1/,
+          /Claude Code: 1 session snapshots/,
         ],
       },
     });
@@ -221,6 +221,7 @@ test("Claude Code CLI report and visual return clear empty-state messages before
     assert.equal(report.text, "No TokenPilot session stats yet.");
 
     const visual = await handleCommand({ args: "visual" });
-    assert.equal(visual.text, "No Claude Code TokenPilot session data found.");
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=claude-code/);
   });
 });

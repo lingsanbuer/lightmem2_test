@@ -219,7 +219,10 @@ export function assertVisualText(params: {
 }): void {
   assert.match(params.text, new RegExp(escapeRegExp(params.header)));
   if (params.sessionId) {
-    assert.match(params.text, new RegExp(`session: ${escapeRegExp(params.sessionId)}`));
+    assert.match(
+      params.text,
+      new RegExp(`session(?:: |=)${escapeRegExp(params.sessionId)}`),
+    );
   }
   for (const pattern of params.requiredPatterns ?? []) {
     assert.match(params.text, pattern);

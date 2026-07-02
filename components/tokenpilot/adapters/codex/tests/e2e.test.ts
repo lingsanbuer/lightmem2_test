@@ -204,10 +204,11 @@ test("Codex host e2e wires install, proxy reduction, report/visual, and MCP reco
         unitLabel: "chars",
       },
       visual: {
-        header: "TokenPilot Codex visual:",
+        header: "LightMem2 visual:",
         requiredPatterns: [
-          /model: gpt-5.4-mini/,
-          /response chain: resp_e2e_1/,
+          /host=codex/,
+          /session=codex-synth-/,
+          /Codex: 1 session snapshots/,
         ],
       },
     });
@@ -779,7 +780,8 @@ test("Codex CLI report and visual return clear empty-state messages before any r
     assert.equal(report.text, "No TokenPilot session stats yet.");
 
     const visual = await handleCommand({ args: "visual" });
-    assert.equal(visual.text, "No Codex TokenPilot session data found.");
+    assert.match(visual.text, /LightMem2 visual: http:\/\/127\.0\.0\.1:/);
+    assert.match(visual.text, /host=codex/);
   });
 });
 
