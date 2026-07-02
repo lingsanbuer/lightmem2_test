@@ -24,6 +24,19 @@ export type GenericArchiveEntry = {
   metadata?: Record<string, unknown>;
 };
 
+export type RecoveredArchiveRenderResult = {
+  text: string;
+  details: {
+    originalSize: number;
+    sourcePass: string;
+    toolName: string;
+    recovered: true;
+    recoveredStartLine?: number;
+    recoveredEndLine?: number;
+    recoveredLineCount?: number;
+  };
+};
+
 type ArchiveContentParams = {
   sessionId: string;
   segmentId: string;
@@ -66,9 +79,55 @@ export function buildRecoveryHint(params: {
   return (
     `\n\n[${sourceLabel}] Full content omitted to save context (${originalSize.toLocaleString()} chars).\n` +
     `To recover it, call the tool memory_fault_recover with {\"dataKey\":\"${dataKey}\"}.\n` +
+    `For a focused code window, you may instead call memory_fault_recover with {\"dataKey\":\"${dataKey}\",\"startLine\":20,\"endLine\":80}.\n` +
     `This is an internal recovery read; do not call the original tool again for this content.\n` +
     `Archive: ${archivePath}`
   );
+}
+
+export function renderRecoveredArchive(params: {
+  dataKey: string;
+  archive: GenericArchiveEntry;
+  startLine?: number;
+  endLine?: number;
+}): RecoveredArchiveRenderResult {
+  const startLine = typeof params.startLine === "number" && Number.isFinite(params.startLine)
+    ? Math.max(1, Math.trunc(params.startLine))
+    : undefined;
+  const endLine = typeof params.endLine === "number" && Number.isFinite(params.endLine)
+    ? Math.max(1, Math.trunc(params.endLine))
+    : undefined;
+  const lines = params.archive.originalText.split("\n");
+  const hasLineWindow = startLine != null || endLine != null;
+  const boundedStart = startLine ?? 1;
+  const boundedEnd = Math.min(endLine ?? lines.length, lines.length);
+  const recoveredText = hasLineWindow
+    ? lines.slice(Math.max(0, boundedStart - 1), Math.max(0, boundedEnd)).join("\n")
+    : params.archive.originalText;
+
+  return {
+    text:
+      `[Memory Fault Recovery] Recovered content for: ${params.dataKey}\n`
+      + `Original size: ${params.archive.originalSize.toLocaleString()} chars\n`
+      + (hasLineWindow ? `Recovered lines: ${boundedStart}-${boundedEnd}\n` : "")
+      + `Archived by: ${params.archive.sourcePass}\n`
+      + `--- Recovered Content ---\n`
+      + `${recoveredText}\n`
+      + "--- End Recovered Content ---",
+    details: {
+      originalSize: params.archive.originalSize,
+      sourcePass: params.archive.sourcePass,
+      toolName: params.archive.toolName,
+      recovered: true,
+      ...(hasLineWindow
+        ? {
+            recoveredStartLine: boundedStart,
+            recoveredEndLine: boundedEnd,
+            recoveredLineCount: Math.max(0, boundedEnd - boundedStart + 1),
+          }
+        : {}),
+    },
+  };
 }
 
 export async function archiveContent(params: ArchiveContentParams): Promise<{

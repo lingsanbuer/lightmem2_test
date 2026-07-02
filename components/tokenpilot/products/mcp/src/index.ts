@@ -6,6 +6,7 @@ import {
   buildRecoveryContextSafePatch,
   MEMORY_FAULT_RECOVER_TOOL_NAME,
   readArchive,
+  renderRecoveredArchive,
   resolveArchivePathAcrossSessions,
   resolveRecoveryStateDir,
 } from "@tokenpilot/runtime-core";
@@ -453,43 +454,19 @@ export async function resolveMemoryFaultRecover(params: {
     };
   }
 
-  const startLine = typeof params.startLine === "number" && Number.isFinite(params.startLine)
-    ? Math.max(1, Math.trunc(params.startLine))
-    : undefined;
-  const endLine = typeof params.endLine === "number" && Number.isFinite(params.endLine)
-    ? Math.max(1, Math.trunc(params.endLine))
-    : undefined;
-  const hasLineWindow = startLine != null || endLine != null;
-  const lines = archive.originalText.split("\n");
-  const boundedStart = startLine ?? 1;
-  const boundedEnd = Math.min(endLine ?? lines.length, lines.length);
-  const recoveredText = hasLineWindow
-    ? lines.slice(Math.max(0, boundedStart - 1), Math.max(0, boundedEnd)).join("\n")
-    : archive.originalText;
+  const rendered = renderRecoveredArchive({
+    dataKey,
+    archive,
+    startLine: params.startLine,
+    endLine: params.endLine,
+  });
 
   return {
-    text:
-      `[Memory Fault Recovery] Recovered content for: ${dataKey}\n`
-      + `Original size: ${archive.originalSize.toLocaleString()} chars\n`
-      + (hasLineWindow ? `Recovered lines: ${boundedStart}-${boundedEnd}\n` : "")
-      + `Archived by: ${archive.sourcePass}\n`
-      + `--- Recovered Content ---\n`
-      + `${recoveredText}\n`
-      + "--- End Recovered Content ---",
+    text: rendered.text,
     details: {
       dataKey,
       archivePath,
-      originalSize: archive.originalSize,
-      ...(hasLineWindow
-        ? {
-            recoveredStartLine: boundedStart,
-            recoveredEndLine: boundedEnd,
-            recoveredLineCount: Math.max(0, boundedEnd - boundedStart + 1),
-          }
-        : {}),
-      sourcePass: archive.sourcePass,
-      toolName: archive.toolName,
-      recovered: true,
+      ...rendered.details,
       contextSafe: {
         ...buildRecoveryContextSafePatch(MEMORY_FAULT_RECOVER_TOOL_NAME),
       },

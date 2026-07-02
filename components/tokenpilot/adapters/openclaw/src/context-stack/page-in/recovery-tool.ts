@@ -3,6 +3,7 @@ import {
   buildRecoveryContextSafePatch,
   MEMORY_FAULT_RECOVER_TOOL_NAME,
   readArchive,
+  renderRecoveredArchive,
   resolveArchivePathFromLookup,
   resolveRecoveryStateDir,
 } from "@tokenpilot/runtime-core";
@@ -29,6 +30,16 @@ export function registerMemoryFaultRecoverTool(
         dataKey: {
           type: "string",
           description: "Archive dataKey from a prior [Tool payload trimmed] notice.",
+        },
+        startLine: {
+          type: "integer",
+          minimum: 1,
+          description: "Optional 1-based start line for partial recovery.",
+        },
+        endLine: {
+          type: "integer",
+          minimum: 1,
+          description: "Optional 1-based end line for partial recovery.",
         },
       },
       required: ["dataKey"],
@@ -57,24 +68,19 @@ export function registerMemoryFaultRecoverTool(
           details: { error: "archive_not_found", dataKey, archivePath },
         };
       }
-
-      const recoveredText =
-        `[Memory Fault Recovery] Recovered content for: ${dataKey}\n` +
-        `Original size: ${archive.originalSize.toLocaleString()} chars\n` +
-        `Archived by: ${archive.sourcePass}\n` +
-        `--- Recovered Content ---\n` +
-        `${archive.originalText}\n` +
-        `--- End Recovered Content ---`;
+      const rendered = renderRecoveredArchive({
+        dataKey,
+        archive,
+        startLine: typeof args?.startLine === "number" ? args.startLine : undefined,
+        endLine: typeof args?.endLine === "number" ? args.endLine : undefined,
+      });
 
       return {
-        content: [{ type: "text", text: recoveredText }],
+        content: [{ type: "text", text: rendered.text }],
         details: {
           dataKey,
           archivePath,
-          originalSize: archive.originalSize,
-          sourcePass: archive.sourcePass,
-          toolName: archive.toolName,
-          recovered: true,
+          ...rendered.details,
           contextSafe: {
             ...buildRecoveryContextSafePatch(MEMORY_FAULT_RECOVER_TOOL_NAME),
           },

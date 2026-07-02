@@ -9,7 +9,7 @@
   },
   "model": "lightmem2/gpt-5.4-mini",
   "stream": true,
-  "instructions": "System bootstrap.\nYour working directory is: <WORKDIR>\nRuntime: agent=<AGENT_ID> | model=lightmem2/gpt-5.4-mini\n\n[Recovery Protocol]\nIf a prior tool result contains `[Tool payload trimmed]`, use `memory_fault_recover` with the provided dataKey instead of re-calling the original tool.\nTreat `memory_fault_recover` as an internal archive read, then continue your analysis normally after recovery.",
+  "instructions": "System bootstrap.\nYour working directory is: <WORKDIR>\nRuntime: agent=<AGENT_ID> | model=lightmem2/gpt-5.4-mini\n\n[Recovery Protocol]\nIf a prior tool result contains `[Tool payload trimmed]`, use `memory_fault_recover` with the provided dataKey instead of re-calling the original tool.\nFor code or file reads, you may recover only the needed window with `startLine` and `endLine` to avoid pulling back the whole archive.\nTreat `memory_fault_recover` as an internal archive read, then continue your analysis normally after recovery.",
   "messages": [
     {
       "role": "user",
