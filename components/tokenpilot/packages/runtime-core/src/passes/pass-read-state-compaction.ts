@@ -4,6 +4,7 @@ import {
   archiveContent,
   buildRecoveryHint,
 } from "../archive-recovery/index.js";
+import { buildRecoveryContextSafePatch } from "../page-in/recovery-common.js";
 import {
   analyzeReadStateCompaction,
   isReadOutputSegment,
@@ -211,6 +212,15 @@ export const readStateCompactionPass: ReductionPassHandler = {
         text: replacementText,
         metadata: {
           ...segment.metadata,
+          contextSafe: {
+            ...(asObject(segment.metadata?.contextSafe) ?? {}),
+            ...buildRecoveryContextSafePatch("read_state_compaction"),
+          },
+          recovery: {
+            ...(asObject(segment.metadata?.recovery) ?? {}),
+            source: "read_state_compaction",
+            skipReduction: true,
+          },
           reduction: {
             ...(segment.metadata?.reduction as Record<string, unknown> ?? {}),
             readStateCompaction: {

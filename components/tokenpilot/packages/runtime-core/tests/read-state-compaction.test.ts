@@ -129,6 +129,10 @@ test("readStateCompactionPass replaces superseded reads with state stub", async 
   assert.ok(updated);
   assert.match(updated?.text ?? "", /\[Read superseded\]/);
   assert.match(updated?.text ?? "", /memory_fault_recover/);
+  assert.equal(
+    ((updated?.metadata as Record<string, unknown> | undefined)?.recovery as Record<string, unknown> | undefined)?.skipReduction,
+    true,
+  );
 });
 
 test("readStateCompactionPass replaces stale reads with state stub", async () => {
@@ -180,6 +184,10 @@ test("readStateCompactionPass replaces stale reads with state stub", async () =>
   assert.ok(updated);
   assert.match(updated?.text ?? "", /\[Read stale\]/);
   assert.match(updated?.text ?? "", /modified later/);
+  assert.equal(
+    ((updated?.metadata as Record<string, unknown> | undefined)?.recovery as Record<string, unknown> | undefined)?.skipReduction,
+    true,
+  );
 });
 
 test("readStateCompactionPass leaves fresh reads untouched", async () => {
@@ -434,6 +442,78 @@ test("runReductionBeforeCall continues after disabled pass and still executes la
   assert.equal(result.report[0]?.skippedReason, "disabled");
   assert.equal(result.report[1]?.id, "read_state_compaction");
   assert.equal(result.report[1]?.changed, true);
+});
+
+test("runReductionBeforeCall does not retrim read-state compaction recovery stubs", async () => {
+  const turnCtx: RuntimeTurnContext = {
+    sessionId: "test-session",
+    sessionMode: "single",
+    provider: "test",
+    model: "test",
+    prompt: "",
+    budget: {
+      maxInputTokens: 100000,
+      reserveOutputTokens: 1000,
+    },
+    segments: [
+      buildSegment("read-1-output", "read", "/repo/a.ts", "const a = 1;\n".repeat(220), "output"),
+      buildSegment("edit-1-arguments", "edit", "/repo/a.ts", "{\"replace\":\"1\",\"with\":\"2\"}", "arguments"),
+    ],
+    metadata: {
+      workspaceDir: "/tmp",
+      latestUserQuery: "show me the latest file state",
+      policy: {
+        decisions: {
+          reduction: {
+            instructions: [
+              {
+                strategy: "read_state_compaction",
+                segmentIds: ["read-1-output"],
+              },
+              {
+                strategy: "tool_payload_trim",
+                segmentIds: ["read-1-output"],
+                parameters: {
+                  payloadKind: "stdout",
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  const result = await runReductionBeforeCall({
+    turnCtx,
+    passes: [
+      {
+        id: "read_state_compaction",
+        phase: "before_call",
+        target: "context_segment",
+        options: {},
+      },
+      {
+        id: "tool_payload_trim",
+        phase: "before_call",
+        target: "tool_payload",
+        options: {
+          maxChars: 220,
+        },
+      },
+    ],
+  });
+
+  const updated = result.turnCtx.segments.find((segment) => segment.id === "read-1-output");
+  assert.ok(updated);
+  assert.match(updated?.text ?? "", /\[Read stale\]/);
+  assert.match(updated?.text ?? "", /memory_fault_recover/);
+  assert.equal(result.report.length, 2);
+  assert.equal(result.report[0]?.id, "read_state_compaction");
+  assert.equal(result.report[0]?.changed, true);
+  assert.equal(result.report[1]?.id, "tool_payload_trim");
+  assert.equal(result.report[1]?.changed, false);
+  assert.equal(result.report[1]?.skippedReason, "recovery_exempt");
 });
 
 test("runReductionBeforeCall outlines the first large code read and leaves the second read intact", async () => {

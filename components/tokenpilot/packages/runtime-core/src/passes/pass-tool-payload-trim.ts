@@ -11,6 +11,7 @@ import {
   type ToolPayloadKind,
   type ToolPayloadRouteConfig,
 } from "../reduction/tool-payload-router.js";
+import { hasRecoveryMarker, MEMORY_FAULT_RECOVER_TOOL_NAME } from "../page-in/recovery-common.js";
 import { classifyReadStates, isReadOutputSegment } from "../reduction/read-state-compaction.js";
 
 const DEFAULT_MAX_CHARS = 1200;
@@ -212,6 +213,15 @@ const readDisclosedReadPaths = (metadata: Record<string, unknown> | undefined): 
   return [...next].slice(-MAX_DISCLOSED_READ_PATHS);
 };
 
+const isRecoveryExemptSegment = (segment: ContextSegment): boolean => {
+  const meta = asObject(segment.metadata);
+  const recovery = asObject(meta?.recovery);
+  if (recovery?.skipReduction === true) return true;
+  if (hasRecoveryMarker(meta, asObject)) return true;
+  if (extractToolName(segment) === MEMORY_FAULT_RECOVER_TOOL_NAME) return true;
+  return segment.text.includes("[Memory Fault Recovery]");
+};
+
 export const toolPayloadTrimPass: ReductionPassHandler = {
   async beforeCall({ turnCtx, spec }) {
     const cfg = resolveConfig(spec.options);
@@ -268,10 +278,17 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
         : undefined;
     const archivePaths: string[] = [];
     let skippedNoNetSavings = 0;
+    let skippedRecoveryExempt = 0;
     const nextSegments: ContextSegment[] = [];
     for (const segment of turnCtx.segments) {
       const entry = segmentMap.get(segment.id);
       if (!entry) {
+        nextSegments.push(segment);
+        continue;
+      }
+
+      if (isRecoveryExemptSegment(segment)) {
+        skippedRecoveryExempt += 1;
         nextSegments.push(segment);
         continue;
       }
@@ -366,7 +383,12 @@ export const toolPayloadTrimPass: ReductionPassHandler = {
     if (touchedSegmentIds.length === 0) {
       return {
         changed: false,
-        skippedReason: skippedNoNetSavings > 0 ? "no_net_savings" : "no_segments_reduced",
+        skippedReason:
+          skippedRecoveryExempt > 0
+            ? "recovery_exempt"
+            : skippedNoNetSavings > 0
+              ? "no_net_savings"
+              : "no_segments_reduced",
         metadata: {
           disclosedReadPaths: [...previouslyReadPaths].slice(-MAX_DISCLOSED_READ_PATHS),
         },
