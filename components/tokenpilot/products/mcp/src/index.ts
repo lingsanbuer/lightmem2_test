@@ -432,6 +432,8 @@ export async function inspectClaudeMcpServerConfig(configPath: string, serverNam
 export async function resolveMemoryFaultRecover(params: {
   dataKey: string;
   stateDir?: string;
+  startLine?: number;
+  endLine?: number;
 }): Promise<MemoryFaultRecoverResult> {
   const dataKey = params.dataKey.trim();
   if (!dataKey) {
@@ -451,18 +453,40 @@ export async function resolveMemoryFaultRecover(params: {
     };
   }
 
+  const startLine = typeof params.startLine === "number" && Number.isFinite(params.startLine)
+    ? Math.max(1, Math.trunc(params.startLine))
+    : undefined;
+  const endLine = typeof params.endLine === "number" && Number.isFinite(params.endLine)
+    ? Math.max(1, Math.trunc(params.endLine))
+    : undefined;
+  const hasLineWindow = startLine != null || endLine != null;
+  const lines = archive.originalText.split("\n");
+  const boundedStart = startLine ?? 1;
+  const boundedEnd = Math.min(endLine ?? lines.length, lines.length);
+  const recoveredText = hasLineWindow
+    ? lines.slice(Math.max(0, boundedStart - 1), Math.max(0, boundedEnd)).join("\n")
+    : archive.originalText;
+
   return {
     text:
       `[Memory Fault Recovery] Recovered content for: ${dataKey}\n`
       + `Original size: ${archive.originalSize.toLocaleString()} chars\n`
+      + (hasLineWindow ? `Recovered lines: ${boundedStart}-${boundedEnd}\n` : "")
       + `Archived by: ${archive.sourcePass}\n`
       + `--- Recovered Content ---\n`
-      + `${archive.originalText}\n`
+      + `${recoveredText}\n`
       + "--- End Recovered Content ---",
     details: {
       dataKey,
       archivePath,
       originalSize: archive.originalSize,
+      ...(hasLineWindow
+        ? {
+            recoveredStartLine: boundedStart,
+            recoveredEndLine: boundedEnd,
+            recoveredLineCount: Math.max(0, boundedEnd - boundedStart + 1),
+          }
+        : {}),
       sourcePass: archive.sourcePass,
       toolName: archive.toolName,
       recovered: true,
@@ -552,6 +576,16 @@ export async function handleMcpRequest(message: McpRequest, params?: {
                   type: "string",
                   description: "Archive dataKey from a prior [Tool payload trimmed] notice.",
                 },
+                startLine: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Optional 1-based start line for partial recovery.",
+                },
+                endLine: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Optional 1-based end line for partial recovery.",
+                },
               },
               required: ["dataKey"],
             },
@@ -577,6 +611,8 @@ export async function handleMcpRequest(message: McpRequest, params?: {
     const result = await resolveMemoryFaultRecover({
       dataKey: typeof argumentsObject.dataKey === "string" ? argumentsObject.dataKey : "",
       stateDir: params?.stateDir,
+      startLine: typeof argumentsObject.startLine === "number" ? argumentsObject.startLine : undefined,
+      endLine: typeof argumentsObject.endLine === "number" ? argumentsObject.endLine : undefined,
     });
     const isError = typeof result.details.error === "string";
     return {

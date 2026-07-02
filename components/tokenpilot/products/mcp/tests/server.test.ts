@@ -41,6 +41,44 @@ test("resolveMemoryFaultRecover restores archived content across sessions", asyn
   }
 });
 
+test("resolveMemoryFaultRecover can restore only a requested line window", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-mcp-lines-"));
+  try {
+    await archiveContent({
+      sessionId: "session-lines",
+      segmentId: "segment-lines",
+      sourcePass: "tool_payload_trim",
+      toolName: "read",
+      dataKey: "segment:code-window",
+      originalText: [
+        "line 1",
+        "line 2",
+        "line 3",
+        "line 4",
+        "line 5",
+      ].join("\n"),
+      archiveDir: join(dir, "tokenpilot", "tool-result-archives", "session-lines"),
+    });
+
+    const result = await resolveMemoryFaultRecover({
+      dataKey: "segment:code-window",
+      stateDir: dir,
+      startLine: 2,
+      endLine: 4,
+    });
+
+    assert.match(result.text, /Recovered lines: 2-4/);
+    assert.doesNotMatch(result.text, /line 1/);
+    assert.match(result.text, /line 2/);
+    assert.match(result.text, /line 4/);
+    assert.doesNotMatch(result.text, /line 5/);
+    assert.equal(result.details.recoveredStartLine, 2);
+    assert.equal(result.details.recoveredEndLine, 4);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("handleMcpRequest returns tools/list and tools/call responses", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-mcp-rpc-"));
   try {
@@ -55,7 +93,9 @@ test("handleMcpRequest returns tools/list and tools/call responses", async () =>
     });
 
     const list = await handleMcpRequest({ id: 1, method: "tools/list" });
-    assert.equal(list?.result?.tools instanceof Array, true);
+    const tools = Array.isArray(list?.result?.tools) ? list.result.tools : [];
+    assert.ok(tools.length > 0);
+    assert.match(JSON.stringify(tools[0] ?? {}), /startLine/);
 
     const call = await handleMcpRequest(
       {
