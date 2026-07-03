@@ -3,6 +3,7 @@ import { readRecentReductionMetrics, summarizeRecentReductionMetrics } from "./m
 import {
   RUNTIME_MODE_PRESETS,
   REDUCTION_PASS_PATHS,
+  countModeDescription,
   countModeLabel,
   formatDisplayValue,
   formatInt,
@@ -294,6 +295,7 @@ export function formatSessionReport(params: {
     ...(overview ?? []).map((item) => `${item.label}: ${item.value}`),
     title ?? "TokenPilot report:",
     `- session: ${sessionId}`,
+    `- count mode: ${countModeDescription(latestCountMode)}`,
     `- saved ${unitLabel}: ${formatInt(savedCount)}`,
     `- recorded turns: ${formatInt(aggregate.turns)}`,
     `- optimized turns: ${formatInt(optimizedTurns)}`,

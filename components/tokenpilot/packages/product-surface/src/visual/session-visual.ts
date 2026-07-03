@@ -116,11 +116,18 @@ async function loadVisualHostsSummary(hosts: VisualHostSource[]): Promise<Array<
   stabilityCount: number;
   reductionCount: number;
   evictionCount: number;
+  tokenSavedCount: number;
+  charSavedCount: number;
+  tokenOptimizedTurns: number;
+  charOptimizedTurns: number;
+  latestCountMode?: string;
   latestAt: string;
 }>> {
   const normalized = normalizeVisualHostSources(hosts);
   return Promise.all(normalized.map(async (host) => {
     const sessions = await readVisualSessionList(host.stateDir);
+    const tokenSavedCount = sessions.reduce((sum, session) => sum + Number(session.tokenSavedCount ?? 0), 0);
+    const charSavedCount = sessions.reduce((sum, session) => sum + Number(session.charSavedCount ?? 0), 0);
     return {
       hostId: host.hostId,
       displayName: host.displayName,
@@ -128,6 +135,11 @@ async function loadVisualHostsSummary(hosts: VisualHostSource[]): Promise<Array<
       stabilityCount: sessions.reduce((sum, session) => sum + Number(session.stabilityCount ?? 0), 0),
       reductionCount: sessions.reduce((sum, session) => sum + Number(session.reductionCount ?? 0), 0),
       evictionCount: sessions.reduce((sum, session) => sum + Number(session.evictionCount ?? 0), 0),
+      tokenSavedCount,
+      charSavedCount,
+      tokenOptimizedTurns: sessions.reduce((sum, session) => sum + Number(session.tokenOptimizedTurns ?? 0), 0),
+      charOptimizedTurns: sessions.reduce((sum, session) => sum + Number(session.charOptimizedTurns ?? 0), 0),
+      latestCountMode: tokenSavedCount > 0 ? "openai_tokens" : (charSavedCount > 0 ? "chars" : undefined),
       latestAt: sessions.reduce((latest, session) => String(session.lastAt ?? "") > latest ? String(session.lastAt ?? "") : latest, ""),
     };
   }));

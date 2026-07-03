@@ -184,6 +184,10 @@ export function countModeLabel(mode: unknown): "tokens" | "chars" {
   return mode === "chars" ? "chars" : "tokens";
 }
 
+export function countModeDescription(mode: unknown): string {
+  return mode === "chars" ? "chars fallback" : "precise OpenAI tokens";
+}
+
 export function formatOnOff(value: unknown): string {
   return value === true ? "on" : "off";
 }

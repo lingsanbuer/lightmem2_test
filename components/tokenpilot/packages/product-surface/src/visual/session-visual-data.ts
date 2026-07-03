@@ -97,6 +97,11 @@ export type VisualSessionSummary = {
   reductionCount: number;
   evictionCount: number;
   lastAt: string;
+  latestCountMode?: string;
+  tokenOptimizedTurns?: number;
+  tokenSavedCount?: number;
+  charOptimizedTurns?: number;
+  charSavedCount?: number;
 };
 
 export type VisualSessionData = {
@@ -250,6 +255,11 @@ export async function readVisualSessionList(stateDir: string): Promise<VisualSes
       reductionCount: 0,
       evictionCount: 0,
       lastAt: "",
+      latestCountMode: undefined,
+      tokenOptimizedTurns: 0,
+      tokenSavedCount: 0,
+      charOptimizedTurns: 0,
+      charSavedCount: 0,
     };
     if (kind === "stability") {
       const snapshots = await readSnapshotFile<StabilityVisualSnapshot>(snapshotCandidates(stateDir, "stability", sessionId));
@@ -282,6 +292,21 @@ export async function readVisualSessionList(stateDir: string): Promise<VisualSes
   for (const fileName of evictionFiles) {
     await mergeCount("eviction", fileName);
   }
+
+  await Promise.all([...summaryBySessionId.values()].map(async (summary) => {
+    const uxAggregate = await readJsonFile<VisualUxAggregate>(uxAggregateCandidates(stateDir, summary.sessionId));
+    if (!uxAggregate) return;
+    summary.latestCountMode = typeof uxAggregate.latestCountMode === "string"
+      ? uxAggregate.latestCountMode
+      : summary.latestCountMode;
+    summary.tokenOptimizedTurns = Number(uxAggregate.tokenOptimizedTurns ?? summary.tokenOptimizedTurns ?? 0);
+    summary.tokenSavedCount = Number(uxAggregate.tokenSavedCount ?? summary.tokenSavedCount ?? 0);
+    summary.charOptimizedTurns = Number(uxAggregate.charOptimizedTurns ?? summary.charOptimizedTurns ?? 0);
+    summary.charSavedCount = Number(uxAggregate.charSavedCount ?? summary.charSavedCount ?? 0);
+    if (typeof uxAggregate.latestAt === "string" && uxAggregate.latestAt > summary.lastAt) {
+      summary.lastAt = uxAggregate.latestAt;
+    }
+  }));
 
   return [...summaryBySessionId.values()].sort((left, right) => right.lastAt.localeCompare(left.lastAt));
 }

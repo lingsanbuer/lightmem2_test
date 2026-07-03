@@ -28,6 +28,7 @@ test("formatSessionReport prefers char aggregates when latest mode is chars", ()
   });
 
   assert.match(text, /saved chars: 162,795/);
+  assert.match(text, /count mode: chars fallback/);
   assert.match(text, /optimized turns: 2/);
   assert.match(text, /avg saved chars per optimized turn: 81,398/);
   assert.match(text, /latest request savings: 80,000 chars/);
@@ -52,6 +53,7 @@ test("formatSessionReport falls back to token aggregates when latest mode is uns
   });
 
   assert.match(text, /saved tokens: 4,500/);
+  assert.match(text, /count mode: precise OpenAI tokens/);
   assert.match(text, /optimized turns: 3/);
   assert.match(text, /avg saved tokens per optimized turn: 1,500/);
   assert.doesNotMatch(text, /latest request savings/);

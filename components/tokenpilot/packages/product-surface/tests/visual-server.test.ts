@@ -140,9 +140,31 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
       `${JSON.stringify(openclawSnapshot)}\n`,
       "utf8",
     );
+    await mkdir(join(openclawStateDir, "tokenpilot", "ux-effects", "sessions"), { recursive: true });
+    await writeFile(
+      join(openclawStateDir, "tokenpilot", "ux-effects", "sessions", "openclaw-session-1.json"),
+      `${JSON.stringify({
+        sessionId: "openclaw-session-1",
+        latestCountMode: "chars",
+        charOptimizedTurns: 1,
+        charSavedCount: 111,
+      }, null, 2)}\n`,
+      "utf8",
+    );
     await writeFile(
       join(codexStateDir, "tokenpilot", "visual", "reduction", "codex-session-1.jsonl"),
       `${JSON.stringify(codexSnapshot)}\n`,
+      "utf8",
+    );
+    await mkdir(join(codexStateDir, "tokenpilot", "ux-effects", "sessions"), { recursive: true });
+    await writeFile(
+      join(codexStateDir, "tokenpilot", "ux-effects", "sessions", "codex-session-1.json"),
+      `${JSON.stringify({
+        sessionId: "codex-session-1",
+        latestCountMode: "openai_tokens",
+        tokenOptimizedTurns: 1,
+        tokenSavedCount: 222,
+      }, null, 2)}\n`,
       "utf8",
     );
 
@@ -169,6 +191,8 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
           stabilityCount: number;
           reductionCount: number;
           evictionCount: number;
+          tokenSavedCount: number;
+          charSavedCount: number;
           latestAt: string;
         }>;
       };
@@ -179,10 +203,12 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
           host.stabilityCount,
           host.reductionCount,
           host.evictionCount,
+          host.tokenSavedCount,
+          host.charSavedCount,
         ]),
         [
-          ["codex", 1, 0, 1, 0],
-          ["openclaw", 1, 0, 1, 0],
+          ["codex", 1, 0, 1, 0, 222, 0],
+          ["openclaw", 1, 0, 1, 0, 0, 111],
         ],
       );
       assert.equal(hostsPayload.hosts[0]?.latestAt, "2026-06-29T11:00:00.000Z");

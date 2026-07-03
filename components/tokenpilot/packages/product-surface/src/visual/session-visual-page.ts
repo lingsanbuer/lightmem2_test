@@ -485,6 +485,17 @@ function fmtInt(value) {
   return new Intl.NumberFormat("en-US").format(Number(value || 0));
 }
 
+function savingsSummary(item) {
+  if (!item) return "";
+  const mode = item.latestCountMode;
+  const tokenSavedCount = Number(item.tokenSavedCount || 0);
+  const charSavedCount = Number(item.charSavedCount || 0);
+  if (mode !== "chars" && tokenSavedCount > 0) return "saved " + fmtInt(tokenSavedCount) + " tok";
+  if (charSavedCount > 0) return "saved " + fmtInt(charSavedCount) + " ch";
+  if (tokenSavedCount > 0) return "saved " + fmtInt(tokenSavedCount) + " tok";
+  return "";
+}
+
 function escapeHtml(text) {
   return String(text || "")
     .replaceAll("&", "&amp;")
@@ -625,6 +636,7 @@ function renderHostOverview() {
   }
   el.overviewRoot.innerHTML = state.hosts.map((host) => {
     const active = host.hostId === state.activeHost ? " active" : "";
+    const savings = savingsSummary(host);
     return '<button class="overview-card' + active + '" data-host-id="' + escapeHtml(host.hostId) + '" type="button">'
       + '<div class="overview-label">' + escapeHtml(host.displayName) + '</div>'
       + '<div class="overview-value">' + escapeHtml(fmtInt(host.sessionCount)) + '</div>'
@@ -633,6 +645,7 @@ function renderHostOverview() {
       + '<span>R ' + escapeHtml(fmtInt(host.reductionCount)) + '</span>'
       + '<span>E ' + escapeHtml(fmtInt(host.evictionCount)) + '</span>'
       + '</div>'
+      + (savings ? '<div class="overview-meta"><span>' + escapeHtml(savings) + '</span></div>' : '')
       + '<div class="overview-meta">'
       + '<span>latest ' + escapeHtml(fmtDate(host.latestAt) || "-") + '</span>'
       + '</div>'
@@ -685,9 +698,10 @@ function renderSessionList() {
       : "Pick a session from the left.";
   el.sessionList.innerHTML = state.sessions.map((session, index) => {
     const active = session.sessionId === state.activeSessionId ? "active" : "";
+    const savings = savingsSummary(session);
     return '<button class="session-item ' + active + '" data-session-id="' + escapeHtml(session.sessionId) + '" data-index="' + (index + 1) + '" type="button">'
       + '<div class="session-id">' + escapeHtml(session.sessionId) + '</div>'
-      + '<div class="session-meta"><span>S ' + fmtInt(session.stabilityCount) + '</span><span>R ' + fmtInt(session.reductionCount) + '</span><span>E ' + fmtInt(session.evictionCount) + '</span><span>' + escapeHtml(fmtDate(session.lastAt)) + '</span></div>'
+      + '<div class="session-meta"><span>S ' + fmtInt(session.stabilityCount) + '</span><span>R ' + fmtInt(session.reductionCount) + '</span><span>E ' + fmtInt(session.evictionCount) + '</span>' + (savings ? '<span>' + escapeHtml(savings) + '</span>' : '') + '<span>' + escapeHtml(fmtDate(session.lastAt)) + '</span></div>'
       + '</button>';
   }).join("");
   el.sessionList.querySelectorAll(".session-item").forEach((node) => {
@@ -763,9 +777,14 @@ function renderStability(item) {
     : "";
 }
 
+function countModeMetaLabel(mode) {
+  return mode === "chars" ? "chars fallback" : "precise OpenAI tokens";
+}
+
 function renderReduction(item) {
   const data = state.sessionData.get((state.activeHost || "") + "::" + state.activeSessionId) || {};
   const recentReduction = data.recentReduction || null;
+  const uxAggregate = data.uxAggregate || null;
   const passes = Array.isArray(item.report) ? item.report : [];
   const changedPasses = passes.filter((entry) => entry && entry.changed);
   el.panelTitle.textContent = "Reduction";
@@ -780,6 +799,9 @@ function renderReduction(item) {
     ["Item index", fmtInt(item.itemIndex)],
     ["Passes touched", fmtInt(changedPasses.length)],
     ["Path", item.dataPath || "-"],
+    ...(uxAggregate && uxAggregate.latestCountMode
+      ? [["Count mode", countModeMetaLabel(uxAggregate.latestCountMode)]]
+      : []),
     ...(recentReduction && recentReduction.totalSavedChars > 0
       ? [["Recent total", fmtInt(recentReduction.totalSavedChars)]]
       : []),

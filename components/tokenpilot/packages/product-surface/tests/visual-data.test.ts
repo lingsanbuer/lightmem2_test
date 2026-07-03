@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import {
   appendReductionVisualSnapshot,
   readVisualSessionData,
+  readVisualSessionList,
 } from "../src/visual/session-visual-data.js";
 
 test("readVisualSessionData returns reduction snapshot route and ux aggregate", async () => {
@@ -55,6 +56,7 @@ test("readVisualSessionData returns reduction snapshot route and ux aggregate", 
     await writeFile(aggregatePath, JSON.stringify({
       sessionId,
       turns: 3,
+      latestCountMode: "chars",
       charOptimizedTurns: 2,
       charSavedCount: 640,
       avgSavedCharsPerOptimizedTurn: 320,
@@ -73,6 +75,9 @@ test("readVisualSessionData returns reduction snapshot route and ux aggregate", 
     assert.equal(data.recentReduction?.totalSavedChars, 320);
     assert.equal(data.recentReduction?.dominantRoute?.key, "readme_doc");
     assert.equal(data.recentReduction?.dominantPass?.key, "tool_payload_trim");
+    const sessions = await readVisualSessionList(stateDir);
+    assert.equal(sessions[0]?.latestCountMode, "chars");
+    assert.equal(sessions[0]?.charSavedCount, 640);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
