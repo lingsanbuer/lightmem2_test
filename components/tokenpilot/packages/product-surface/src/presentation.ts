@@ -43,6 +43,17 @@ export type ProductSurfaceSessionOverviewItem = {
   value: string | number;
 };
 
+export type ProductSurfaceSessionReportData = {
+  title?: string;
+  sessionId: string;
+  aggregate: ProductSurfaceSessionAggregate | null;
+  latest?: ProductSurfaceLatestUxEffect | null;
+  detailsEnabled: boolean;
+  recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
+  overview?: ProductSurfaceSessionOverviewItem[];
+  emptyMessage?: string;
+};
+
 export function formatTokenPilotHelp(section?: string): string {
   if (section === "stabilizer") {
     return [
@@ -301,6 +312,38 @@ export function formatSessionReport(params: {
   }
 
   return lines.join("\n");
+}
+
+export function buildSessionReportText(params: ProductSurfaceSessionReportData): string {
+  const {
+    title,
+    sessionId,
+    aggregate,
+    latest,
+    detailsEnabled,
+    recentMetrics,
+    overview,
+    emptyMessage,
+  } = params;
+
+  if (!aggregate) {
+    return [
+      ...(overview ?? []).map((item) => `${item.label}: ${item.value}`),
+      title ?? "TokenPilot report:",
+      `- session: ${sessionId}`,
+      emptyMessage ?? "- no savings recorded yet",
+    ].join("\n");
+  }
+
+  return formatSessionReport({
+    title,
+    sessionId,
+    aggregate,
+    latest,
+    detailsEnabled,
+    recentMetrics,
+    overview,
+  });
 }
 
 export { formatInt };

@@ -3,7 +3,7 @@ import {
   readUxSessionAggregate,
 } from "@tokenpilot/host-adapter";
 import {
-  formatSessionReport,
+  buildSessionReportText,
   readRecentReductionMetrics,
   type ProductSurfaceSessionOverviewItem,
 } from "@tokenpilot/product-surface";
@@ -98,16 +98,7 @@ export async function renderCodexSessionReport(stateDir: string, sessionRef?: st
     overview.push({ label: "Response chain", value: topology.responseChain.join(" -> ") });
   }
 
-  if (!aggregate) {
-    return [
-      ...overview.map((item) => `${item.label}: ${item.value}`),
-      "TokenPilot Codex report:",
-      `- session: ${topology.sessionId}`,
-      "- no savings recorded yet",
-    ].join("\n");
-  }
-
-  return formatSessionReport({
+  return buildSessionReportText({
     title: "TokenPilot Codex report:",
     sessionId: topology.sessionId,
     aggregate,

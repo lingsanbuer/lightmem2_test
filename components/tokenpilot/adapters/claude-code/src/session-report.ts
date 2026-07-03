@@ -3,7 +3,7 @@ import {
   readUxSessionAggregate,
 } from "@tokenpilot/host-adapter";
 import {
-  formatSessionReport,
+  buildSessionReportText,
   readRecentReductionMetrics,
   type ProductSurfaceSessionOverviewItem,
 } from "@tokenpilot/product-surface";
@@ -113,16 +113,7 @@ export async function renderClaudeCodeSessionReport(stateDir: string, sessionRef
     overview.push({ label: "Response chain", value: topology.responseChain.join(" -> ") });
   }
 
-  if (!aggregate) {
-    return [
-      ...overview.map((item) => `${item.label}: ${item.value}`),
-      "TokenPilot Claude Code report:",
-      `- session: ${topology.sessionId}`,
-      "- no savings recorded yet",
-    ].join("\n");
-  }
-
-  return formatSessionReport({
+  return buildSessionReportText({
     title: "TokenPilot Claude Code report:",
     sessionId: topology.sessionId,
     aggregate,

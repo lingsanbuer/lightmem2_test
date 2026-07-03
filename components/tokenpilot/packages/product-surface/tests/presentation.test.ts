@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatSessionReport } from "../src/presentation.js";
+import { buildSessionReportText, formatSessionReport } from "../src/presentation.js";
 import { renderVisualPageHtml } from "../src/visual/session-visual-page.js";
 
 test("formatSessionReport prefers char aggregates when latest mode is chars", () => {
@@ -69,4 +69,23 @@ test("renderVisualPageHtml includes core visual navigation structure", () => {
   assert.match(html, /overviewRoot/);
   assert.match(html, /compare/);
   assert.match(html, /hostSelect/);
+});
+
+test("buildSessionReportText renders empty-state reports with overview", () => {
+  const text = buildSessionReportText({
+    title: "TokenPilot Codex report:",
+    sessionId: "session-empty",
+    aggregate: null,
+    latest: null,
+    detailsEnabled: true,
+    overview: [
+      { label: "Session", value: "session-empty" },
+      { label: "Model", value: "gpt-5.4" },
+    ],
+  });
+
+  assert.match(text, /^Session: session-empty/m);
+  assert.match(text, /^Model: gpt-5\.4/m);
+  assert.match(text, /TokenPilot Codex report:/);
+  assert.match(text, /- no savings recorded yet/);
 });

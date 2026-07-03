@@ -4,7 +4,7 @@ import { resolveSessionIdFromCommandScope } from "../../session/command-scope-ma
 import { loadRecentTurnBindingsFromState } from "../../session/turn-bindings.js";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
-import { formatSessionReport, getNestedValue, readRecentReductionMetrics, toRecord } from "@tokenpilot/product-surface";
+import { buildSessionReportText, getNestedValue, readRecentReductionMetrics, toRecord } from "@tokenpilot/product-surface";
 import {
   pluginConfigRecord,
   resolveStateDir,
@@ -158,7 +158,7 @@ export async function handleReport(ctx: any, currentConfig: Record<string, unkno
     ? await readRecentReductionMetrics(stateDir, sessionId)
     : null;
   return {
-    text: formatSessionReport({
+    text: buildSessionReportText({
       sessionId,
       aggregate,
       latest,

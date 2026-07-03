@@ -11,7 +11,12 @@ import {
   type ToolPayloadKind,
   type ToolPayloadRouteConfig,
 } from "../reduction/tool-payload-router.js";
-import { hasRecoveryMarker, MEMORY_FAULT_RECOVER_TOOL_NAME } from "../page-in/recovery-common.js";
+import {
+  hasRecoveryMarker,
+  hasRecoverySkipReductionFlag,
+  isRecoveryText,
+  MEMORY_FAULT_RECOVER_TOOL_NAME,
+} from "../page-in/recovery-common.js";
 import { classifyReadStates, isReadOutputSegment } from "../reduction/read-state-compaction.js";
 
 const DEFAULT_MAX_CHARS = 1200;
@@ -215,11 +220,10 @@ const readDisclosedReadPaths = (metadata: Record<string, unknown> | undefined): 
 
 const isRecoveryExemptSegment = (segment: ContextSegment): boolean => {
   const meta = asObject(segment.metadata);
-  const recovery = asObject(meta?.recovery);
-  if (recovery?.skipReduction === true) return true;
+  if (hasRecoverySkipReductionFlag(meta, asObject)) return true;
   if (hasRecoveryMarker(meta, asObject)) return true;
   if (extractToolName(segment) === MEMORY_FAULT_RECOVER_TOOL_NAME) return true;
-  return segment.text.includes("[Memory Fault Recovery]");
+  return isRecoveryText(segment.text);
 };
 
 export const toolPayloadTrimPass: ReductionPassHandler = {
