@@ -26,6 +26,9 @@ importers:
       '@tokenpilot/mcp':
         specifier: workspace:*
         version: link:../../products/mcp
+      '@tokenpilot/product-surface':
+        specifier: workspace:*
+        version: link:../../packages/product-surface
     devDependencies:
       esbuild:
         specifier: ^0.25.10
@@ -51,6 +54,9 @@ importers:
       '@tokenpilot/mcp':
         specifier: workspace:*
         version: link:../../products/mcp
+      '@tokenpilot/product-surface':
+        specifier: workspace:*
+        version: link:../../packages/product-surface
       '@tokenpilot/runtime-core':
         specifier: workspace:*
         version: link:../../packages/runtime-core

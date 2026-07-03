@@ -1,4 +1,5 @@
 import type { TokenPilotProductSurfaceConfigAdapter } from "@tokenpilot/host-adapter";
+import { readRecentReductionMetrics } from "./metrics.js";
 import {
   RUNTIME_MODE_PRESETS,
   REDUCTION_PASS_PATHS,
@@ -10,6 +11,7 @@ import {
 } from "./config.js";
 
 export type ProductSurfaceLatestUxEffect = {
+  sessionId?: string;
   countMode?: "litellm_tokens" | "chars";
   details?: {
     requestSavedCount?: number;
@@ -52,6 +54,20 @@ export type ProductSurfaceSessionReportData = {
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
   overview?: ProductSurfaceSessionOverviewItem[];
   emptyMessage?: string;
+};
+
+export type ProductSurfaceSessionReportReaders = {
+  readLatest(
+    stateDir: string,
+  ): Promise<ProductSurfaceLatestUxEffect | null>;
+  readAggregate(
+    stateDir: string,
+    sessionId: string,
+  ): Promise<ProductSurfaceSessionAggregate | null>;
+  readRecentMetrics?(
+    stateDir: string,
+    sessionId: string,
+  ): Promise<ProductSurfaceRecentReductionMetrics | null>;
 };
 
 export function formatTokenPilotHelp(section?: string): string {
@@ -344,6 +360,61 @@ export function buildSessionReportText(params: ProductSurfaceSessionReportData):
     recentMetrics,
     overview,
   });
+}
+
+export async function loadSessionReportData(params: {
+  stateDir: string;
+  title?: string;
+  sessionId: string;
+  detailsEnabled: boolean;
+  readers: ProductSurfaceSessionReportReaders;
+  recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
+  overview?: ProductSurfaceSessionOverviewItem[];
+  emptyMessage?: string;
+}): Promise<ProductSurfaceSessionReportData> {
+  const {
+    stateDir,
+    title,
+    sessionId,
+    detailsEnabled,
+    readers,
+    recentMetrics,
+    overview,
+    emptyMessage,
+  } = params;
+  const [aggregate, latest, loadedRecentMetrics] = await Promise.all([
+    readers.readAggregate(stateDir, sessionId),
+    readers.readLatest(stateDir),
+    detailsEnabled && !recentMetrics
+      ? (readers.readRecentMetrics
+        ? readers.readRecentMetrics(stateDir, sessionId)
+        : readRecentReductionMetrics(stateDir, sessionId))
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    title,
+    sessionId,
+    aggregate,
+    latest: latest?.sessionId === sessionId ? latest : null,
+    detailsEnabled,
+    recentMetrics: recentMetrics ?? loadedRecentMetrics,
+    overview,
+    emptyMessage,
+  };
+}
+
+export async function renderSessionReport(params: {
+  stateDir: string;
+  title?: string;
+  sessionId: string;
+  detailsEnabled: boolean;
+  readers: ProductSurfaceSessionReportReaders;
+  recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
+  overview?: ProductSurfaceSessionOverviewItem[];
+  emptyMessage?: string;
+}): Promise<string> {
+  return buildSessionReportText(await loadSessionReportData(params));
 }
 
 export { formatInt };

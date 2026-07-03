@@ -3,8 +3,7 @@ import {
   readUxSessionAggregate,
 } from "@tokenpilot/host-adapter";
 import {
-  buildSessionReportText,
-  readRecentReductionMetrics,
+  renderSessionReport,
   type ProductSurfaceSessionOverviewItem,
 } from "@tokenpilot/product-surface";
 import {
@@ -87,12 +86,6 @@ export async function renderClaudeCodeSessionReport(stateDir: string, sessionRef
   const topology = await resolveClaudeCodeSessionTopology(stateDir, sessionRef);
   if (!topology) return "No Claude Code TokenPilot session data found.";
 
-  const [aggregate, latestEffect, recentMetrics] = await Promise.all([
-    readUxSessionAggregate(stateDir, topology.sessionId),
-    readLatestUxEffect(stateDir),
-    readRecentReductionMetrics(stateDir, topology.sessionId),
-  ]);
-
   const overview: ProductSurfaceSessionOverviewItem[] = [
     { label: "Session", value: topology.sessionId },
     { label: "Turns", value: topology.turnCount },
@@ -113,13 +106,15 @@ export async function renderClaudeCodeSessionReport(stateDir: string, sessionRef
     overview.push({ label: "Response chain", value: topology.responseChain.join(" -> ") });
   }
 
-  return buildSessionReportText({
+  return renderSessionReport({
+    stateDir,
     title: "TokenPilot Claude Code report:",
     sessionId: topology.sessionId,
-    aggregate,
-    latest: latestEffect?.sessionId === topology.sessionId ? latestEffect : null,
     detailsEnabled: true,
-    recentMetrics,
     overview,
+    readers: {
+      readLatest: readLatestUxEffect,
+      readAggregate: readUxSessionAggregate,
+    },
   });
 }
