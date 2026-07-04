@@ -245,7 +245,11 @@ test("prependTextToContent inserts input_text block when content array has no wr
 
 test("applyStablePrefixToInstructions rewrites instructions and injects dynamic context into first user message", () => {
   const envelope: HostRequestEnvelope = {
-    session: { hostId: "test", sessionId: "session-1" },
+    session: {
+      host: { hostId: "test", displayName: "Test Host" },
+      sessionId: "session-1",
+      sessionMode: "single",
+    },
     model: "gpt-5.4",
     stream: true,
     instructions: [
@@ -275,7 +279,11 @@ test("applyStablePrefixToInstructions rewrites instructions and injects dynamic 
 
 test("applyStablePrefixToInstructions can keep dynamic context inside instructions for developer-targeted hosts", () => {
   const envelope: HostRequestEnvelope = {
-    session: { hostId: "test", sessionId: "session-2" },
+    session: {
+      host: { hostId: "test", displayName: "Test Host" },
+      sessionId: "session-2",
+      sessionMode: "single",
+    },
     model: "gpt-5.4",
     stream: true,
     instructions: [
@@ -303,7 +311,11 @@ test("applyStablePrefixToInstructions can keep dynamic context inside instructio
 
 test("applyStablePrefixToMessage rewrites root prompt and injects dynamic context into first user message", () => {
   const envelope: HostRequestEnvelope = {
-    session: { hostId: "test", sessionId: "session-3" },
+    session: {
+      host: { hostId: "test", displayName: "Test Host" },
+      sessionId: "session-3",
+      sessionMode: "single",
+    },
     model: "gpt-5.4",
     stream: true,
     messages: [
