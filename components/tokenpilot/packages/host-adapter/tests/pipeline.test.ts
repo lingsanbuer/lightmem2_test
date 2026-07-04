@@ -10,6 +10,10 @@ import { prepareBeforeCallWithReductionSummary } from "../src/pipeline/before-ca
 import { runBeforeCallReductionOrchestrator } from "../src/pipeline/reduction-orchestrator.js";
 import { stripInternalPayloadFields } from "../src/pipeline/recovery.js";
 import { prependTextToContent } from "../src/pipeline/message-text.js";
+import {
+  applyStablePrefixToInstructions,
+  applyStablePrefixToMessage,
+} from "../src/pipeline/stable-prefix.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -237,4 +241,93 @@ test("prependTextToContent inserts input_text block when content array has no wr
     { type: "input_image", image_url: "https://example.com/demo.png" },
     { type: "input_file", file_id: "file-123" },
   ]);
+});
+
+test("applyStablePrefixToInstructions rewrites instructions and injects dynamic context into first user message", () => {
+  const envelope: HostRequestEnvelope = {
+    session: { hostId: "test", sessionId: "session-1" },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      { role: "user", content: "Fix the failing test." },
+      { role: "assistant", content: "Looking now." },
+    ],
+    rawPayload: {},
+  };
+
+  const result = applyStablePrefixToInstructions({
+    envelope,
+    dynamicContextTarget: "user",
+  });
+
+  assert.notEqual(result, envelope);
+  assert.match(String(result.instructions ?? ""), /<WORKDIR>/);
+  assert.match(String(result.instructions ?? ""), /agent=<AGENT_ID>/);
+  assert.equal(String(result.instructions ?? "").includes("/repo/demo"), false);
+  assert.match(String(result.messages[0]?.content ?? ""), /WORKDIR: \/repo\/demo/);
+  assert.match(String(result.messages[0]?.content ?? ""), /AGENT_ID: worker-123/);
+});
+
+test("applyStablePrefixToInstructions can keep dynamic context inside instructions for developer-targeted hosts", () => {
+  const envelope: HostRequestEnvelope = {
+    session: { hostId: "test", sessionId: "session-2" },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      { role: "user", content: "Fix the failing test." },
+    ],
+    rawPayload: {},
+  };
+
+  const result = applyStablePrefixToInstructions({
+    envelope,
+    dynamicContextTarget: "developer",
+    mergeDynamicContextIntoInstructions: true,
+  });
+
+  assert.notEqual(result, envelope);
+  assert.match(String(result.instructions ?? ""), /<WORKDIR>/);
+  assert.match(String(result.instructions ?? ""), /WORKDIR: \/repo\/demo/);
+  assert.equal(String(result.messages[0]?.content ?? ""), "Fix the failing test.");
+});
+
+test("applyStablePrefixToMessage rewrites root prompt and injects dynamic context into first user message", () => {
+  const envelope: HostRequestEnvelope = {
+    session: { hostId: "test", sessionId: "session-3" },
+    model: "gpt-5.4",
+    stream: true,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are the coding agent.",
+          "Your working directory is: /repo/demo",
+          "Runtime: agent=worker-123 | mode=interactive",
+        ].join("\n"),
+      },
+      { role: "user", content: "Fix the failing test." },
+    ],
+    rawPayload: {},
+  };
+
+  const result = applyStablePrefixToMessage({
+    envelope,
+    messageIndex: 0,
+    dynamicContextTarget: "user",
+  });
+
+  assert.notEqual(result, envelope);
+  assert.match(String(result.messages[0]?.content ?? ""), /<WORKDIR>/);
+  assert.match(String(result.messages[1]?.content ?? ""), /WORKDIR: \/repo\/demo/);
+  assert.match(String(result.messages[1]?.content ?? ""), /AGENT_ID: worker-123/);
 });

@@ -7,6 +7,115 @@ import {
   rewriteTextForStablePrefix,
 } from "./message-text.js";
 
+export function findFirstUserMessageIndex(messages: HostRequestEnvelope["messages"]): number {
+  return messages.findIndex((message) => message?.role === "user");
+}
+
+export function applyStablePrefixToInstructions(params: {
+  envelope: HostRequestEnvelope;
+  dynamicContextTarget?: "developer" | "user";
+  mergeDynamicContextIntoInstructions?: boolean;
+}): HostRequestEnvelope {
+  const {
+    envelope,
+    dynamicContextTarget = "user",
+    mergeDynamicContextIntoInstructions = false,
+  } = params;
+  const sourceInstructions = typeof envelope.instructions === "string" ? envelope.instructions : "";
+  if (!sourceInstructions.trim()) return envelope;
+
+  const rewrite = rewriteTextForStablePrefix(sourceInstructions);
+  if (!rewrite.changed) return envelope;
+
+  let nextInstructions = rewrite.forwardedText;
+  let nextMessages = envelope.messages;
+  let changed = nextInstructions !== sourceInstructions;
+
+  if (rewrite.dynamicContextText && dynamicContextTarget === "developer" && mergeDynamicContextIntoInstructions) {
+    nextInstructions = `${rewrite.forwardedText}\n\n${rewrite.dynamicContextText}`;
+    changed = true;
+  }
+
+  if (rewrite.dynamicContextText && dynamicContextTarget === "user") {
+    const userIndex = findFirstUserMessageIndex(envelope.messages);
+    if (userIndex >= 0) {
+      const userMessage = envelope.messages[userIndex];
+      const currentText = extractContentText(userMessage.content);
+      if (!currentText.includes(rewrite.dynamicContextText)) {
+        nextMessages = envelope.messages.slice();
+        nextMessages[userIndex] = {
+          ...userMessage,
+          content: prependTextToContent(userMessage.content, rewrite.dynamicContextText),
+        };
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) return envelope;
+  return {
+    ...envelope,
+    instructions: nextInstructions,
+    messages: nextMessages,
+  };
+}
+
+export function applyStablePrefixToMessage(params: {
+  envelope: HostRequestEnvelope;
+  messageIndex: number;
+  dynamicContextTarget?: "developer" | "user";
+  mergeDynamicContextIntoMessage?: boolean;
+}): HostRequestEnvelope {
+  const {
+    envelope,
+    messageIndex,
+    dynamicContextTarget = "user",
+    mergeDynamicContextIntoMessage = false,
+  } = params;
+  const message = envelope.messages[messageIndex];
+  if (!message) return envelope;
+  const sourceText = extractContentText(message.content);
+  if (!sourceText.trim()) return envelope;
+
+  const rewrite = rewriteTextForStablePrefix(sourceText);
+  if (!rewrite.changed) return envelope;
+
+  let nextMessages = envelope.messages.slice();
+  let changed = false;
+  const nextText =
+    rewrite.dynamicContextText && dynamicContextTarget === "developer" && mergeDynamicContextIntoMessage
+      ? `${rewrite.forwardedText}\n\n${rewrite.dynamicContextText}`
+      : rewrite.forwardedText;
+  if (nextText !== sourceText) {
+    nextMessages[messageIndex] = {
+      ...message,
+      content: replaceContentText(message.content, nextText),
+    };
+    changed = true;
+  }
+
+  if (rewrite.dynamicContextText && dynamicContextTarget === "user") {
+    const userIndex = findFirstUserMessageIndex(nextMessages);
+    if (userIndex >= 0) {
+      const userMessage = nextMessages[userIndex];
+      const currentText = extractContentText(userMessage.content);
+      if (!currentText.includes(rewrite.dynamicContextText)) {
+        nextMessages[userIndex] = {
+          ...userMessage,
+          content: prependTextToContent(userMessage.content, rewrite.dynamicContextText),
+        };
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) return envelope;
+  return {
+    ...envelope,
+    messages: nextMessages,
+  };
+}
+
 function rewriteInstructions(
   envelope: HostRequestEnvelope,
 ): {
