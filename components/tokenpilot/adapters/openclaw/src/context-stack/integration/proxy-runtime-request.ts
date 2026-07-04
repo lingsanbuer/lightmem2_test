@@ -301,13 +301,10 @@ export async function prepareProxyRequest(args: {
     ? String(requestEnvelope.metadata.promptCacheKey)
     : typeof payload?.prompt_cache_key === "string" && payload.prompt_cache_key.trim().length > 0
       ? String(payload.prompt_cache_key)
-    : "";
+      : "";
   if (!proxyPureForward && devAndUser && rootPromptRewrite && Array.isArray(requestEnvelope.messages) && devAndUser.developerIndex >= 0) {
     const nextMessages = requestEnvelope.messages.slice();
-    const forwardedDeveloperText =
-      dynamicContextTarget === "developer" && rootPromptRewrite.dynamicContextText
-        ? `${helpers.normalizeText(rootPromptRewrite.forwardedPromptText)}\n\n${helpers.normalizeText(rootPromptRewrite.dynamicContextText)}`
-        : rootPromptRewrite.forwardedPromptText;
+    const forwardedDeveloperText = rootPromptRewrite.forwardedPromptText;
     nextMessages[devAndUser.developerIndex] = {
       ...(devAndUser.developerItem ?? nextMessages[devAndUser.developerIndex]),
       role: "developer",
@@ -328,6 +325,17 @@ export async function prepareProxyRequest(args: {
       messages: nextMessages,
     };
     syncOpenClawPayloadFromEnvelope(payload, requestEnvelope, payloadCodec);
+    if (dynamicContextTarget === "developer" && rootPromptRewrite.dynamicContextText) {
+      const inserted = helpers.insertDeveloperDynamicContextBlock(
+        payload?.input,
+        rootPromptRewrite.dynamicContextText,
+        devAndUser.developerIndex,
+      );
+      if (inserted.changed) {
+        payload.input = inserted.input;
+        requestEnvelope = payloadCodec.decodeRequest(payload);
+      }
+    }
   }
   const stableRewrite = !proxyPureForward
     ? helpers.rewritePayloadForStablePrefix(payload, model, {

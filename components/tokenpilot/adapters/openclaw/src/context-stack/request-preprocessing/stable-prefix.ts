@@ -141,8 +141,8 @@ function computeStablePromptCacheKey(
   const seed = JSON.stringify({
     v: 3,
     model,
-    instructions: "",
-    developer: "",
+    instructions: normalizeStableText(stripRuntimeTailForKey(stripToolingSectionForKey(instructions))),
+    developer: normalizeStableText(stripRuntimeTailForKey(stripToolingSectionForKey(developerText))),
   });
   const digest = createHash("sha256").update(seed).digest("hex").slice(0, 24);
   return `runtime-pfx-${digest}`;
@@ -288,6 +288,39 @@ export function rewritePayloadForStablePrefix(
     senderMetadataBlocksAfter,
     developerTextForKey: developerTextForKeyNormalized,
   };
+}
+
+function hasDeveloperDynamicContextBlock(input: any, dynamicContextText: string): boolean {
+  const target = normalizeText(dynamicContextText);
+  if (!Array.isArray(input) || !target) return true;
+  return input.some((item: any) => {
+    if (!item || typeof item !== "object" || String(item.role) !== "developer") return false;
+    return normalizeText(extractInputText([item])) === target;
+  });
+}
+
+export function insertDeveloperDynamicContextBlock(
+  input: any,
+  dynamicContextText: string,
+  afterIndex?: number,
+): { input: any; changed: boolean } {
+  const target = String(dynamicContextText ?? "").trim();
+  if (!Array.isArray(input) || !target) return { input, changed: false };
+  if (hasDeveloperDynamicContextBlock(input, target)) return { input, changed: false };
+
+  const insertAt =
+    typeof afterIndex === "number"
+      ? Math.max(0, Math.min(input.length, afterIndex + 1))
+      : (() => {
+          const userIndex = input.findIndex((item: any) => item && typeof item === "object" && String(item.role) === "user");
+          return userIndex >= 0 ? userIndex : input.length;
+        })();
+  const next = input.slice();
+  next.splice(insertAt, 0, {
+    role: "developer",
+    content: target,
+  });
+  return { input: next, changed: true };
 }
 
 export function estimatePayloadInputChars(input: any): number {

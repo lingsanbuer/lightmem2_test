@@ -5,6 +5,7 @@ import {
   extractInputText,
   findDeveloperAndPrimaryUser,
   findRootPromptCandidate,
+  insertDeveloperDynamicContextBlock,
   normalizeText,
   rewritePayloadForStablePrefix,
 } from "./context-stack/request-preprocessing/stable-prefix.js";
@@ -86,6 +87,7 @@ export const proxyRuntimeHelpers = {
   rewriteRootPromptForStablePrefix,
   prependTextToContent,
   rewritePayloadForStablePrefix,
+  insertDeveloperDynamicContextBlock,
   estimatePayloadInputChars,
   appendTaskStateTrace,
   applyProxyReductionToInput,
@@ -223,6 +225,7 @@ function withTestWorkspaceDir(result: ReturnType<typeof buildLayeredReductionCon
 
 export const __testHooks = {
   rewritePayloadForStablePrefix,
+  insertDeveloperDynamicContextBlock,
   applyProxyReductionToInput: (
     payload: any,
     options?: {

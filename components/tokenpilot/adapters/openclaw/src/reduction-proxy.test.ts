@@ -22,6 +22,14 @@ const hooks = plugin.__testHooks as {
     senderMetadataBlocksAfter: number;
     developerTextForKey: string;
   };
+  insertDeveloperDynamicContextBlock: (
+    input: any,
+    dynamicContextText: string,
+    afterIndex?: number,
+  ) => {
+    input: any;
+    changed: boolean;
+  };
   applyProxyReductionToInput: (
     payload: any,
     options?: Record<string, unknown>,
@@ -219,6 +227,44 @@ test("rewritePayloadForStablePrefix preserves content shape and injects dynamic 
   });
   assert.match(String(payload.input[1].content[0].text), /Please continue\./);
   assert.match(out.promptCacheKey, /^runtime-pfx-/);
+});
+
+test("rewritePayloadForStablePrefix derives different cache keys for different stable prefixes", () => {
+  const payloadA: any = {
+    instructions: "Global instructions A",
+    input: [
+      {
+        role: "developer",
+        content: "Developer prompt A\nYour working directory is: /tmp/demo",
+      },
+      {
+        role: "user",
+        content: "Please continue.",
+      },
+    ],
+  };
+  const payloadB: any = {
+    instructions: "Global instructions B",
+    input: [
+      {
+        role: "developer",
+        content: "Developer prompt B\nYour working directory is: /tmp/demo",
+      },
+      {
+        role: "user",
+        content: "Please continue.",
+      },
+    ],
+  };
+
+  const outA = hooks.rewritePayloadForStablePrefix(payloadA, "tokenpilot/gpt-5.4-mini", {
+    dynamicContextTarget: "developer",
+  });
+  const outB = hooks.rewritePayloadForStablePrefix(payloadB, "tokenpilot/gpt-5.4-mini", {
+    dynamicContextTarget: "developer",
+  });
+
+  assert.notEqual(outA.promptCacheKey, outB.promptCacheKey);
 });
 
 test("applyProxyReductionToInput still runs with policy-only before-call modules", async () => {
@@ -633,6 +679,43 @@ test("prepareProxyRequest preserves stable prefix, memory injection, and reducti
     prepared.requestEnvelope.messages[prepared.requestEnvelope.messages.length - 1]?.content,
     "reduction mutation survives",
   );
+});
+
+test("prepareProxyRequest isolates developer dynamic context into a separate developer block", async () => {
+  const cfg = hooks.normalizeConfig({
+    modules: {
+      policy: false,
+      reduction: false,
+    },
+  });
+
+  const payload: any = {
+    model: "tokenpilot/gpt-5.4-mini",
+    input: [
+      {
+        role: "developer",
+        content: "Runtime: agent=test-agent | host=demo\nYour working directory is: /tmp/demo\n\nDeveloper prompt",
+      },
+      {
+        role: "user",
+        content: "Please continue the task.",
+      },
+    ],
+  };
+
+  const prepared = await hooks.prepareProxyRequest({
+    cfg,
+    payload,
+    resolveSessionIdForPayload: () => "session-dev-split",
+    dynamicContextTarget: "developer",
+  });
+
+  const developerItems = prepared.payload.input.filter((item: any) => item?.role === "developer");
+  assert.equal(developerItems.length, 2);
+  assert.match(String(developerItems[0]?.content ?? ""), /<WORKDIR>/);
+  assert.doesNotMatch(String(developerItems[0]?.content ?? ""), /WORKDIR: \/tmp\/demo/);
+  assert.match(String(developerItems[1]?.content ?? ""), /WORKDIR: \/tmp\/demo/);
+  assert.match(String(developerItems[1]?.content ?? ""), /AGENT_ID: test-agent/);
 });
 
 test("applyLayeredReductionAfterCall rewrites responses JSON output text through after-call passes", async () => {
