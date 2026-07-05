@@ -23,6 +23,7 @@ async function main() {
     `- command skills dir: ${result.commandSkillsDir}`,
     `- command skills: ${result.commandSkillNames.join(", ")}`,
     `- lightmem2 CLI bin: ${result.cliBinInstalled ? `installed at ${result.cliBinPath}` : `skipped (missing build at ${result.cliBinPath})`}`,
+    ...(result.hostCliBinPath ? [`- tokenpilot-claude-code CLI bin: installed at ${result.hostCliBinPath}`] : []),
     ...(!result.cliBinDirOnPath ? [`- lightmem2 CLI PATH note: add ${result.cliBinDir} to PATH if 'lightmem2' is unavailable.`] : []),
     `- tool search env: ${result.toolSearchEnvName}=${result.toolSearchEnvValue}`,
     `- recovery MCP server: ${result.mcpServerName}`,

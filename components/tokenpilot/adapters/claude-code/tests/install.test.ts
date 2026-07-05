@@ -3,10 +3,13 @@ import test from "node:test";
 import { lstat, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { readCliContextState } from "../../../products/cli/src/context-store.js";
 import { installClaudeCodeTokenPilot, resolveClaudeCodeHookCommandForInstall } from "../src/install.js";
 
 test("installClaudeCodeTokenPilot writes settings, MCP config, and backups existing files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-install-"));
+  const originalHome = process.env.HOME;
+  process.env.HOME = dir;
   try {
     const settingsPath = join(dir, "settings.json");
     const mcpConfigPath = join(dir, ".claude.json");
@@ -64,18 +67,27 @@ test("installClaudeCodeTokenPilot writes settings, MCP config, and backups exist
     assert.equal(result.cliBinPath, join(cliBinDir, "lightmem2"));
     assert.equal(result.cliBinDir, cliBinDir);
     assert.equal(result.cliBinDirOnPath, false);
+    assert.equal(result.hostCliBinPath, join(cliBinDir, "tokenpilot-claude-code"));
     assert.equal((await lstat(result.cliBinPath)).isSymbolicLink(), true);
     assert.match(await readlink(result.cliBinPath), /products[\/\\]cli[\/\\]dist[\/\\]cli\.js$/);
+    assert.equal((await lstat(result.hostCliBinPath!)).isSymbolicLink(), true);
+    assert.match(await readlink(result.hostCliBinPath!), /adapters[\/\\]claude-code[\/\\]dist[\/\\]cli\.js$/);
     assert.match(result.expectedHookCommand, /hooks-handler\.(js|ts)/);
     assert.ok(result.expectedMcpArgs.length > 0);
     assert.equal(result.expectedMcpStartupTimeoutSec, 90);
     assert.equal(result.mcpProbe.ok, true);
     assert.equal(result.mcpProbe.degraded, false);
+    const cliContext = await readCliContextState(join(dir, ".lightmem2", "state", "cli-context.json"));
+    assert.equal(cliContext.configPathsByHost?.["claude-code"]?.tokenPilotConfigPath, tokenPilotConfigPath);
+    assert.equal(cliContext.configPathsByHost?.["claude-code"]?.hostConfigPath, settingsPath);
+    assert.equal(cliContext.configPathsByHost?.["claude-code"]?.hostAuxConfigPath, mcpConfigPath);
 
     const skillRaw = await readFile(join(result.commandSkillsDir, "lightmem2-doctor", "SKILL.md"), "utf8");
     assert.match(skillRaw, /lightmem2 claude-code doctor/);
     assert.match(skillRaw, /disable-model-invocation:\s*true/);
   } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     await rm(dir, { recursive: true, force: true });
   }
 });

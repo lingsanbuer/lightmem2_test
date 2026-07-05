@@ -26,6 +26,8 @@ import {
   installCommandSkillBridge,
 } from "../../shared/command-skill-bridge.js";
 import { installLightmem2CliBin } from "../../shared/cli-bin-install.js";
+import { rememberCliHostPathOverrides } from "../../shared/cli-context.js";
+import { installHostCliBin } from "../../shared/host-cli-bin-install.js";
 
 function quoteToml(value: string): string {
   return JSON.stringify(value);
@@ -206,6 +208,10 @@ function isLoopbackProxyProvider(provider: CodexProviderConfig | undefined): boo
   return Boolean(normalizeLocalProxyBaseUrl(provider?.baseUrl));
 }
 
+function sameProviderEndpoint(left: CodexProviderConfig | undefined, right: CodexProviderConfig | undefined): boolean {
+  return Boolean(left?.baseUrl && right?.baseUrl && left.baseUrl === right.baseUrl);
+}
+
 async function canListenOnPort(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
@@ -359,6 +365,7 @@ export async function installCodexTokenPilot(params?: {
   cliBinPath: string;
   cliBinDir: string;
   cliBinDirOnPath: boolean;
+  hostCliBinPath?: string;
   mcpProbe: {
     ok: boolean;
     detail: string;
@@ -389,12 +396,17 @@ export async function installCodexTokenPilot(params?: {
   const providerAlreadyRouted = tokenPilotConfig.providerName === providerName
     && interceptedProvider?.baseUrl === previousProxyBaseUrl
     && Boolean(tokenPilotConfig.upstream?.baseUrl);
-  const upstreamProvider = providerAlreadyRouted || isLoopbackProxyProvider(interceptedProvider)
+  const installedProviderLooksFresh = existingInterceptedProxyBaseUrl === previousProxyBaseUrl;
+  const upstreamProvider = providerAlreadyRouted || installedProviderLooksFresh
     ? tokenPilotConfig.upstream
     : interceptedProvider;
   tokenPilotConfig.providerName = providerName;
   tokenPilotConfig.upstreamProvider = providerName;
-  if (upstreamProvider?.baseUrl && !isLoopbackProxyProvider(upstreamProvider)) {
+  if (
+    upstreamProvider?.baseUrl
+    && !isLoopbackProxyProvider(upstreamProvider)
+    && !sameProviderEndpoint(upstreamProvider, tokenPilotConfig.upstream)
+  ) {
     tokenPilotConfig.upstream = upstreamProvider;
   }
   await writeTokenPilotCodexConfig(tokenPilotConfig, tokenPilotConfigPath);
@@ -442,6 +454,18 @@ export async function installCodexTokenPilot(params?: {
     adapterRoot: adapterRootFromHere(),
     binDir: params?.cliBinDir,
   });
+  const hostCliBin = cliBin.installed
+    ? await installHostCliBin({
+      adapterRoot: adapterRootFromHere(),
+      host: "codex",
+      binDir: cliBin.binDir,
+    })
+    : undefined;
+  await rememberCliHostPathOverrides("codex", {
+    tokenPilotConfigPath,
+    hostConfigPath: codexConfigPath,
+    hostAuxConfigPath: hooksConfigPath,
+  });
   const expectedHookCommand = await resolveCodexHookCommandForInstall(params?.platform);
   const mcpProbeResult = params?.probeMcp === false
     ? {
@@ -474,6 +498,7 @@ export async function installCodexTokenPilot(params?: {
     cliBinPath: cliBin.binPath,
     cliBinDir: cliBin.binDir,
     cliBinDirOnPath: cliBin.binDirOnPath,
+    hostCliBinPath: hostCliBin?.binPath,
     mcpProbe: {
       ...mcpProbeResult,
       degraded: !mcpProbeResult.ok,

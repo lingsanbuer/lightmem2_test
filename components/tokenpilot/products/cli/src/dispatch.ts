@@ -63,6 +63,15 @@ async function resolveTarget(argv: string[]): Promise<{
       "LightMem2 CLI context:",
       `- lastActiveHost: ${state.lastActiveHost ?? "(unset)"}`,
       ...CLI_HOSTS.map((host) => `- ${host.hostId} session: ${state.lastSessionByHost?.[host.hostId] ?? "(unset)"}`),
+      ...CLI_HOSTS.map((host) => {
+        const overrides = state.configPathsByHost?.[host.hostId];
+        const summary = [
+          overrides?.tokenPilotConfigPath,
+          overrides?.hostConfigPath,
+          overrides?.hostAuxConfigPath,
+        ].filter(Boolean);
+        return `- ${host.hostId} config target: ${summary.length > 0 ? summary.join(" | ") : "(unset)"}`;
+      }),
       `- lastUpdatedAt: ${state.lastUpdatedAt ?? "(unset)"}`,
     ];
     return { commandArgs: [], handledText: lines.join("\n") };

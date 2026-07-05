@@ -17,6 +17,9 @@ installCodexTokenPilot({
   if (!result.cliBinDirOnPath) {
     console.log(`lightmem2 CLI PATH note: add ${result.cliBinDir} to PATH if 'lightmem2' is unavailable.`);
   }
+  if (result.hostCliBinPath) {
+    console.log(`tokenpilot-codex CLI bin: installed at ${result.hostCliBinPath}`);
+  }
   console.log(`Recovery MCP probe: ${result.mcpProbe.ok ? "ok" : "degraded"}`);
   console.log(`Recovery MCP probe detail: ${result.mcpProbe.detail}`);
   console.log(`Proxy base URL: ${result.baseUrl}`);

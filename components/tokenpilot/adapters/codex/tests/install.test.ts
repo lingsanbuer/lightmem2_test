@@ -4,16 +4,21 @@ import { spawn } from "node:child_process";
 import { chmod, lstat, mkdtemp, mkdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
+import { readCliContextState } from "../../../products/cli/src/context-store.js";
 import {
   loadTokenPilotCodexConfig,
   normalizeTokenPilotCodexConfig,
   writeTokenPilotCodexConfig,
 } from "../src/config.js";
 import { daemonPaths, readDaemonStatus } from "../src/daemon.js";
+import { inspectCodexDoctor } from "../src/doctor.js";
 import { installCodexTokenPilot, resolveCodexHookCommandForInstall } from "../src/install.js";
 
 test("installCodexTokenPilot writes provider, MCP, and hooks with expected commands", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-"));
+  const originalHome = process.env.HOME;
+  process.env.HOME = dir;
   try {
     const codexConfigPath = join(dir, "config.toml");
     const hooksConfigPath = join(dir, "hooks.json");
@@ -65,11 +70,18 @@ test("installCodexTokenPilot writes provider, MCP, and hooks with expected comma
     assert.equal(result.cliBinPath, join(cliBinDir, "lightmem2"));
     assert.equal(result.cliBinDir, cliBinDir);
     assert.equal(result.cliBinDirOnPath, false);
+    assert.equal(result.hostCliBinPath, join(cliBinDir, "tokenpilot-codex"));
     assert.equal((await lstat(result.cliBinPath)).isSymbolicLink(), true);
     assert.match(await readlink(result.cliBinPath), /products[\/\\]cli[\/\\]dist[\/\\]cli\.js$/);
+    assert.equal((await lstat(result.hostCliBinPath!)).isSymbolicLink(), true);
+    assert.match(await readlink(result.hostCliBinPath!), /adapters[\/\\]codex[\/\\]dist[\/\\]cli\.js$/);
     const tokenPilotConfig = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
     assert.equal(tokenPilotConfig.upstreamProvider, "OPENAI");
     assert.equal(tokenPilotConfig.upstream?.baseUrl, "https://api.openai.com/v1");
+    const cliContext = await readCliContextState(join(dir, ".lightmem2", "state", "cli-context.json"));
+    assert.equal(cliContext.configPathsByHost?.codex?.tokenPilotConfigPath, tokenPilotConfigPath);
+    assert.equal(cliContext.configPathsByHost?.codex?.hostConfigPath, codexConfigPath);
+    assert.equal(cliContext.configPathsByHost?.codex?.hostAuxConfigPath, hooksConfigPath);
 
     const hooks = JSON.parse(await readFile(hooksConfigPath, "utf8")) as {
       hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>>;
@@ -86,6 +98,8 @@ test("installCodexTokenPilot writes provider, MCP, and hooks with expected comma
     const policyRaw = await readFile(join(result.commandSkillsDir, "lightmem2-report", "agents", "openai.yaml"), "utf8");
     assert.match(policyRaw, /allow_implicit_invocation:\s*false/);
   } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -216,6 +230,40 @@ test("installCodexTokenPilot preserves the last real upstream when the current p
     const codexToml = await readFile(codexConfigPath, "utf8");
     assert.match(codexToml, new RegExp(`base_url = "http://127\\.0\\.0\\.1:${tokenPilotConfig.proxyPort}/v1"`));
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("installCodexTokenPilot does not treat a fresh default install as an upstream loop", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-codex-install-fresh-upstream-"));
+  const originalHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    const codexConfigPath = join(dir, "config.toml");
+    const hooksConfigPath = join(dir, "hooks.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+
+    const result = await installCodexTokenPilot({
+      codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+      probeMcp: false,
+    });
+
+    const tokenPilotConfig = await loadTokenPilotCodexConfig(tokenPilotConfigPath);
+    assert.equal(tokenPilotConfig.upstream?.baseUrl, undefined);
+    assert.equal(tokenPilotConfig.upstreamProvider, "OpenAI");
+    const report = await inspectCodexDoctor({
+      config: tokenPilotConfig,
+      configPath: codexConfigPath,
+      hooksConfigPath,
+      tokenPilotConfigPath,
+    });
+    assert.equal(report.upstreamLoopDetected, false);
+    assert.equal(report.upstreamBaseUrl, undefined);
+  } finally {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     await rm(dir, { recursive: true, force: true });
   }
 });

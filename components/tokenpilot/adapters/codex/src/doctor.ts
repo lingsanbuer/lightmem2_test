@@ -187,10 +187,11 @@ export async function inspectCodexDoctor(params: {
   });
   const proxyHealthy = await checkHealth(proxyBaseUrl);
   const providerIntercepted = tokenpilotProvider?.baseUrl === proxyBaseUrl;
+  const fallbackUpstreamBaseUrl = params.config.upstreamProvider
+    ? (await readCodexProviderFromToml(params.config.upstreamProvider, params.configPath))?.baseUrl
+    : undefined;
   const upstreamBaseUrl = params.config.upstream?.baseUrl
-    ?? (params.config.upstreamProvider
-      ? (await readCodexProviderFromToml(params.config.upstreamProvider, params.configPath))?.baseUrl
-      : undefined);
+    ?? (providerIntercepted ? undefined : fallbackUpstreamBaseUrl);
   const upstreamLoopDetected = Boolean(normalizeLocalProxyBaseUrl(upstreamBaseUrl));
   const mcpHealth = inspectTokenPilotMcpHealth({
     observed: mcp,

@@ -24,6 +24,8 @@ import {
   installCommandSkillBridge,
 } from "../../shared/command-skill-bridge.js";
 import { installLightmem2CliBin } from "../../shared/cli-bin-install.js";
+import { rememberCliHostPathOverrides } from "../../shared/cli-context.js";
+import { installHostCliBin } from "../../shared/host-cli-bin-install.js";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -152,6 +154,7 @@ export async function installClaudeCodeTokenPilot(params?: {
   cliBinPath: string;
   cliBinDir: string;
   cliBinDirOnPath: boolean;
+  hostCliBinPath?: string;
   mcpProbe: {
     ok: boolean;
     detail: string;
@@ -230,6 +233,18 @@ export async function installClaudeCodeTokenPilot(params?: {
     adapterRoot: adapterRootFromHere(),
     binDir: params?.cliBinDir,
   });
+  const hostCliBin = cliBin.installed
+    ? await installHostCliBin({
+      adapterRoot: adapterRootFromHere(),
+      host: "claude-code",
+      binDir: cliBin.binDir,
+    })
+    : undefined;
+  await rememberCliHostPathOverrides("claude-code", {
+    tokenPilotConfigPath,
+    hostConfigPath: settingsPath,
+    hostAuxConfigPath: mcpConfigPath,
+  });
   const mcpProbe = params?.probeMcp === false
     ? {
       ok: false,
@@ -264,6 +279,7 @@ export async function installClaudeCodeTokenPilot(params?: {
     cliBinPath: cliBin.binPath,
     cliBinDir: cliBin.binDir,
     cliBinDirOnPath: cliBin.binDirOnPath,
+    hostCliBinPath: hostCliBin?.binPath,
     mcpProbe: {
       ...mcpProbe,
       degraded: !mcpProbe.ok,
