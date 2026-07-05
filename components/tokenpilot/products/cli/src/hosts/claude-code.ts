@@ -29,6 +29,10 @@ import {
 } from "../../../../adapters/claude-code/src/host-config-adapter.js";
 import { resolveLatestClaudeCodeSessionId } from "../../../../adapters/claude-code/src/session-state.js";
 import {
+  readRecentClaudeCodeCacheAuditRecordsForSession,
+  summarizeClaudeCodeCacheAudit,
+} from "../../../../adapters/claude-code/src/cache-audit.js";
+import {
   applyStandardRuntimeModeConfig,
   buildSessionReportResult,
   createRestrictedHostCommandHandler,
@@ -151,6 +155,10 @@ export function createClaudeCodeCliBridge(target: {
         resolveLatestSessionId: resolveLatestClaudeCodeSessionId,
         readLatestUxEffect,
         readSessionAggregate: readUxSessionAggregate,
+        async readCacheAuditSummary(stateDir, sessionId) {
+          const records = await readRecentClaudeCodeCacheAuditRecordsForSession(stateDir, sessionId, 64);
+          return records.length > 0 ? summarizeClaudeCodeCacheAudit(records) : null;
+        },
       });
     },
   };

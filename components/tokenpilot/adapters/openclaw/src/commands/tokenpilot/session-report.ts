@@ -11,6 +11,10 @@ import {
 } from "./host-config-adapter.js";
 import { resolveOpenClawSessionsRegistryPath } from "../../context-stack/integration/openclaw-paths.js";
 import { buildOpenClawSessionOverview, readOpenClawSessionSummary } from "../../session/session-summary.js";
+import {
+  readRecentOpenClawCacheAuditRecordsForSession,
+  summarizeOpenClawCacheAudit,
+} from "../../cache-audit.js";
 
 function normalizeSessionRef(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -156,11 +160,16 @@ export async function handleReport(ctx: any, currentConfig: Record<string, unkno
   const pluginCfg = pluginConfigRecord(currentConfig);
   const detailsEnabled = getNestedValue(pluginCfg, ["ux", "details"]) === true;
   const summary = await readOpenClawSessionSummary(stateDir, sessionId);
+  const cacheAuditRecords = await readRecentOpenClawCacheAuditRecordsForSession(stateDir, sessionId, 64);
+  const cacheAuditSummary = cacheAuditRecords.length > 0
+    ? summarizeOpenClawCacheAudit(cacheAuditRecords)
+    : null;
   return {
     text: await renderSessionReport({
       stateDir,
       sessionId,
       detailsEnabled,
+      cacheAuditSummary,
       overview: buildOpenClawSessionOverview(sessionId, summary),
       readers: {
         readLatest: readLatestUxEffect,

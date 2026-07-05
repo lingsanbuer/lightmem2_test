@@ -9,6 +9,10 @@ import {
   type ProductSurfaceSessionOverviewItem,
 } from "@tokenpilot/product-surface";
 import {
+  readRecentClaudeCodeCacheAuditRecordsForSession,
+  summarizeClaudeCodeCacheAudit,
+} from "./cache-audit.js";
+import {
   loadClaudeCodeRecentTurnBindings,
   loadClaudeCodeSessionSnapshot,
   resolveLatestClaudeCodeSessionId,
@@ -87,6 +91,10 @@ export async function renderClaudeCodeSessionReport(stateDir: string, sessionRef
   if (topology.lastToolName) {
     overview.push({ label: "Last tool", value: topology.lastToolName });
   }
+  const cacheAuditRecords = await readRecentClaudeCodeCacheAuditRecordsForSession(stateDir, topology.sessionId, 64);
+  const cacheAuditSummary = cacheAuditRecords.length > 0
+    ? summarizeClaudeCodeCacheAudit(cacheAuditRecords)
+    : null;
 
   return renderSessionReport({
     stateDir,
@@ -94,6 +102,7 @@ export async function renderClaudeCodeSessionReport(stateDir: string, sessionRef
     sessionId: topology.sessionId,
     detailsEnabled: true,
     overview,
+    cacheAuditSummary,
     readers: {
       readLatest: readLatestUxEffect,
       readAggregate: readUxSessionAggregate,

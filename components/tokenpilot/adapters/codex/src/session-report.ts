@@ -7,6 +7,7 @@ import {
   resolveBaseSessionTopology,
   renderSessionReport,
 } from "@tokenpilot/product-surface";
+import { readRecentCodexCacheAuditRecordsForSession, summarizeCodexCacheAudit } from "./cache-audit.js";
 import {
   loadCodexRecentTurnBindings,
   loadCodexSessionSnapshot,
@@ -71,6 +72,10 @@ export async function renderCodexSessionReport(stateDir: string, sessionRef?: st
   if (!topology) return "No Codex TokenPilot session data found.";
 
   const overview = buildBaseSessionOverview(topology);
+  const cacheAuditRecords = await readRecentCodexCacheAuditRecordsForSession(stateDir, topology.sessionId, 64);
+  const cacheAuditSummary = cacheAuditRecords.length > 0
+    ? summarizeCodexCacheAudit(cacheAuditRecords)
+    : null;
 
   return renderSessionReport({
     stateDir,
@@ -78,6 +83,7 @@ export async function renderCodexSessionReport(stateDir: string, sessionRef?: st
     sessionId: topology.sessionId,
     detailsEnabled: true,
     overview,
+    cacheAuditSummary,
     readers: {
       readLatest: readLatestUxEffect,
       readAggregate: readUxSessionAggregate,

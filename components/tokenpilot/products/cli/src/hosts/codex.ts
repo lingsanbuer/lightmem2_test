@@ -29,6 +29,10 @@ import {
   resolveLatestCodexSessionId,
 } from "../../../../adapters/codex/src/session-state.js";
 import {
+  readRecentCodexCacheAuditRecordsForSession,
+  summarizeCodexCacheAudit,
+} from "../../../../adapters/codex/src/cache-audit.js";
+import {
   applyStandardRuntimeModeConfig,
   buildSessionReportResult,
   createRestrictedHostCommandHandler,
@@ -170,6 +174,10 @@ export function createCodexCliBridge(target: {
         resolveLatestSessionId: resolveLatestCodexSessionId,
         readLatestUxEffect,
         readSessionAggregate: readUxSessionAggregate,
+        async readCacheAuditSummary(stateDir, sessionId) {
+          const records = await readRecentCodexCacheAuditRecordsForSession(stateDir, sessionId, 64);
+          return records.length > 0 ? summarizeCodexCacheAudit(records) : null;
+        },
       });
     },
   };

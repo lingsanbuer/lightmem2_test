@@ -55,7 +55,19 @@ export type ProductSurfaceSessionReportData = {
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
   overview?: ProductSurfaceSessionOverviewItem[];
   emptyMessage?: string;
+  cacheAuditSummary?: {
+    warmCandidates: number;
+    warmHits: number;
+    warmMisses: number;
+    hitRatePercent: number;
+    responsePromptCacheKeyRewriteCount?: number;
+    promptCacheKeyMismatchCount: number;
+    topEntropyKinds: Array<{ key: string; count: number }>;
+    topDriftKeys: Array<{ key: string; count: number }>;
+  } | null;
 };
+
+export type ProductSurfaceCacheAuditSummary = NonNullable<ProductSurfaceSessionReportData["cacheAuditSummary"]>;
 
 export type ProductSurfaceSessionReportReaders = {
   readLatest(
@@ -282,8 +294,9 @@ export function formatSessionReport(params: {
   detailsEnabled: boolean;
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
   overview?: ProductSurfaceSessionOverviewItem[];
+  cacheAuditSummary?: ProductSurfaceSessionReportData["cacheAuditSummary"];
 }): string {
-  const { title, sessionId, aggregate, latest, detailsEnabled, recentMetrics, overview } = params;
+  const { title, sessionId, aggregate, latest, detailsEnabled, recentMetrics, overview, cacheAuditSummary } = params;
   const latestCountMode = latest?.countMode ?? aggregate.latestCountMode ?? "openai_tokens";
   const unitLabel = countModeLabel(latestCountMode);
   const savedCount = latestCountMode === "chars" ? aggregate.charSavedCount : aggregate.tokenSavedCount;
@@ -344,6 +357,33 @@ export function formatSessionReport(params: {
       }
       if (skippedReasons) lines.push(`- recent skipped reasons: ${skippedReasons}`);
     }
+    if (cacheAuditSummary && cacheAuditSummary.warmCandidates > 0) {
+      lines.push(`- cache warm hits: ${formatInt(cacheAuditSummary.warmHits)}/${formatInt(cacheAuditSummary.warmCandidates)} (${formatPercent(cacheAuditSummary.hitRatePercent)})`);
+      if (cacheAuditSummary.warmMisses > 0) {
+        lines.push(`- cache warm misses: ${formatInt(cacheAuditSummary.warmMisses)}`);
+      }
+    }
+    const responseKeyRewriteCount =
+      cacheAuditSummary?.responsePromptCacheKeyRewriteCount
+      ?? cacheAuditSummary?.promptCacheKeyMismatchCount
+      ?? 0;
+    if (responseKeyRewriteCount > 0) {
+      lines.push(`- response cache key rewrites: ${formatInt(responseKeyRewriteCount)}`);
+    }
+    if (cacheAuditSummary?.topEntropyKinds?.length) {
+      lines.push(
+        `- cache entropy hotspots: ${cacheAuditSummary.topEntropyKinds
+          .map((entry) => `${entry.key}=${formatInt(entry.count)}`)
+          .join(", ")}`,
+      );
+    }
+    if (cacheAuditSummary?.topDriftKeys?.length) {
+      lines.push(
+        `- cache drift hotspots: ${cacheAuditSummary.topDriftKeys
+          .map((entry) => `${entry.key}=${formatInt(entry.count)}`)
+          .join(", ")}`,
+      );
+    }
   }
 
   return lines.join("\n");
@@ -359,6 +399,7 @@ export function buildSessionReportText(params: ProductSurfaceSessionReportData):
     recentMetrics,
     overview,
     emptyMessage,
+    cacheAuditSummary,
   } = params;
 
   if (!aggregate) {
@@ -378,6 +419,7 @@ export function buildSessionReportText(params: ProductSurfaceSessionReportData):
     detailsEnabled,
     recentMetrics,
     overview,
+    cacheAuditSummary,
   });
 }
 
@@ -390,6 +432,7 @@ export async function loadSessionReportData(params: {
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
   overview?: ProductSurfaceSessionOverviewItem[];
   emptyMessage?: string;
+  cacheAuditSummary?: ProductSurfaceSessionReportData["cacheAuditSummary"];
 }): Promise<ProductSurfaceSessionReportData> {
   const {
     stateDir,
@@ -400,6 +443,7 @@ export async function loadSessionReportData(params: {
     recentMetrics,
     overview,
     emptyMessage,
+    cacheAuditSummary,
   } = params;
   const [aggregate, latest, loadedRecentMetrics] = await Promise.all([
     readers.readAggregate(stateDir, sessionId),
@@ -420,6 +464,7 @@ export async function loadSessionReportData(params: {
     recentMetrics: recentMetrics ?? loadedRecentMetrics,
     overview,
     emptyMessage,
+    cacheAuditSummary,
   };
 }
 
@@ -432,6 +477,7 @@ export async function renderSessionReport(params: {
   recentMetrics?: ProductSurfaceRecentReductionMetrics | null;
   overview?: ProductSurfaceSessionOverviewItem[];
   emptyMessage?: string;
+  cacheAuditSummary?: ProductSurfaceSessionReportData["cacheAuditSummary"];
 }): Promise<string> {
   return buildSessionReportText(await loadSessionReportData(params));
 }

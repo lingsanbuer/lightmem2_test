@@ -81,6 +81,42 @@ test("openclaw handleReport includes recent metrics and recovery aggregates when
       reductionSavedChars: 360,
       updatedAt: new Date().toISOString(),
     });
+    await writeFile(
+      join(dir, "cache-audit.jsonl"),
+      [
+        JSON.stringify({
+          at: "2026-07-05T00:00:00.000Z",
+          sessionId,
+          model: "gpt-5.4",
+          stream: false,
+          stablePrefixFingerprint: "fp-a",
+          stablePrefix: { schemaVersion: 1, stableCore: [], semiStableContext: [] },
+          entropyFindings: [{ kind: "abs_path", segmentKey: "instructions", layer: "stable_core", detail: "path" }],
+          driftReasons: [{ kind: "segment_text_changed", key: "instructions", detail: "changed" }],
+          requestPromptCacheKey: "pk-a",
+          responsePromptCacheKey: "pk-b",
+          cachedInputTokens: 64,
+          usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 64 } },
+          status: 200,
+        }),
+        JSON.stringify({
+          at: "2026-07-05T00:01:00.000Z",
+          sessionId: "other-session",
+          model: "gpt-5.4",
+          stream: false,
+          stablePrefixFingerprint: "fp-other",
+          stablePrefix: { schemaVersion: 1, stableCore: [], semiStableContext: [] },
+          entropyFindings: [{ kind: "uuid", segmentKey: "instructions", layer: "stable_core", detail: "uuid" }],
+          driftReasons: [{ kind: "segment_text_changed", key: "tools", detail: "changed" }],
+          requestPromptCacheKey: "pk-other",
+          responsePromptCacheKey: "pk-other-2",
+          cachedInputTokens: 0,
+          usage: { input_tokens: 120 },
+          status: 200,
+        }),
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = await handleReport(
       { sessionId },
@@ -120,6 +156,9 @@ test("openclaw handleReport includes recent metrics and recovery aggregates when
     assert.match(result.text, /recent skipped reasons:/i);
     assert.match(result.text, /below_trigger_min_chars=1/i);
     assert.match(result.text, /pipeline_no_effect=1/i);
+    assert.match(result.text, /response cache key rewrites: 1/i);
+    assert.match(result.text, /cache entropy hotspots: abs_path=1/i);
+    assert.doesNotMatch(result.text, /uuid=1/i);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

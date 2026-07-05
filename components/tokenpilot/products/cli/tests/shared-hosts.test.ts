@@ -146,6 +146,19 @@ test("shared host helpers return shared report fallback messages and report text
         avgSavedCharsPerOptimizedTurn: 400,
       };
     },
+    async readCacheAuditSummary(_stateDir, sessionId) {
+      assert.equal(sessionId, "session-a");
+      return {
+        warmCandidates: 2,
+        warmHits: 1,
+        warmMisses: 1,
+        hitRatePercent: 50,
+        responsePromptCacheKeyRewriteCount: 1,
+        promptCacheKeyMismatchCount: 1,
+        topEntropyKinds: [{ key: "abs_path", count: 2 }],
+        topDriftKeys: [{ key: "instructions", count: 1 }],
+      };
+    },
   });
 
   assert.equal(noStateDir.text, "TokenPilot stateDir is not configured.");
@@ -153,4 +166,6 @@ test("shared host helpers return shared report fallback messages and report text
   assert.equal(noAggregate.text, "No TokenPilot savings recorded yet for session session-latest.");
   assert.match(report.text, /session: session-a/);
   assert.match(report.text, /saved chars: 800/);
+  assert.match(report.text, /cache warm hits: 1\/2 \(50%\)/i);
+  assert.match(report.text, /response cache key rewrites: 1/i);
 });

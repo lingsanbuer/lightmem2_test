@@ -10,6 +10,7 @@ import {
   formatSessionReport,
   getNestedValue,
   readRecentReductionMetrics,
+  type ProductSurfaceCacheAuditSummary,
   type ProductSurfaceLatestUxEffect,
   type ProductSurfaceSessionAggregate,
 } from "@tokenpilot/product-surface";
@@ -105,6 +106,10 @@ export async function buildSessionReportResult(params: {
   resolveLatestSessionId(stateDir: string): Promise<string | undefined>;
   readLatestUxEffect(stateDir: string): Promise<LatestUxEffectWithSessionId | null>;
   readSessionAggregate(stateDir: string, sessionId: string): Promise<ProductSurfaceSessionAggregate | null>;
+  readCacheAuditSummary?(
+    stateDir: string,
+    sessionId: string,
+  ): Promise<ProductSurfaceCacheAuditSummary | null>;
 }): Promise<TokenPilotProductCommandResult> {
   const stateDir = params.configAdapter.resolveStateDir(params.currentConfig);
   if (!stateDir) {
@@ -129,6 +134,9 @@ export async function buildSessionReportResult(params: {
   const recentMetrics = detailsEnabled
     ? await readRecentReductionMetrics(stateDir, sessionId)
     : null;
+  const cacheAuditSummary = detailsEnabled && params.readCacheAuditSummary
+    ? await params.readCacheAuditSummary(stateDir, sessionId)
+    : null;
   return {
     text: formatSessionReport({
       sessionId,
@@ -136,6 +144,7 @@ export async function buildSessionReportResult(params: {
       latest,
       detailsEnabled,
       recentMetrics,
+      cacheAuditSummary,
     }),
   };
 }
