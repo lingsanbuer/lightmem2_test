@@ -228,6 +228,20 @@ function dedupeReductionSnapshots(
   return out;
 }
 
+function sortReductionSegmentsWithinCall(
+  snapshots: ReductionVisualSnapshot[],
+): ReductionVisualSnapshot[] {
+  return [...snapshots].sort((left, right) => {
+    const itemIndexDelta = Number(right.itemIndex ?? 0) - Number(left.itemIndex ?? 0);
+    if (itemIndexDelta !== 0) return itemIndexDelta;
+    const blockIndexDelta = Number(right.blockIndex ?? -1) - Number(left.blockIndex ?? -1);
+    if (blockIndexDelta !== 0) return blockIndexDelta;
+    const savedCharsDelta = Number(right.savedChars ?? 0) - Number(left.savedChars ?? 0);
+    if (savedCharsDelta !== 0) return savedCharsDelta;
+    return String(right.segmentId ?? "").localeCompare(String(left.segmentId ?? ""));
+  });
+}
+
 function groupReductionSnapshotsByRequest(
   snapshots: ReductionVisualSnapshot[],
 ): VisualReductionCallGroup[] {
@@ -262,7 +276,7 @@ function groupReductionSnapshotsByRequest(
   return [...groups.values()]
     .map((group) => ({
       ...group,
-      segments: sortByAtDesc(group.segments),
+      segments: sortReductionSegmentsWithinCall(group.segments),
     }))
     .sort((left, right) => String(right.at).localeCompare(String(left.at)));
 }

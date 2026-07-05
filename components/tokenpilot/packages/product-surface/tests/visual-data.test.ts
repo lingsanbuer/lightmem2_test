@@ -181,6 +181,9 @@ test("readVisualSessionData returns reduction snapshot route and ux aggregate", 
     assert.equal(data.reductionCalls?.[1]?.totalSavedChars, 500);
     assert.equal(data.reductionCalls?.[1]?.toolNames.join(","), "read");
     assert.equal(data.reductionCalls?.[1]?.routes.join(","), "code_like,readme_doc");
+    assert.equal(data.reductionCalls?.[1]?.segments[0]?.segmentId, "seg-2");
+    assert.equal(data.reductionCalls?.[1]?.segments[0]?.itemIndex, 1);
+    assert.equal(data.reductionCalls?.[1]?.segments[1]?.segmentId, "seg-1");
     assert.equal(data.uxAggregate?.charSavedCount, 640);
     assert.equal(data.uxAggregate?.routeSavedChars?.readme_doc, 640);
     assert.equal(data.recentReduction?.totalSavedChars, 320);
@@ -206,6 +209,68 @@ test("readVisualSessionData returns reduction snapshot route and ux aggregate", 
     assert.equal(sessions[0]?.charSavedCount, 640);
     assert.equal(sessions[0]?.reductionCount, 2);
     assert.equal(sessions[0]?.cacheAuditSummary?.warmHits, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("readVisualSessionData orders same-call segments by later item position when timestamps tie", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tokenpilot-product-surface-visual-call-order-"));
+  try {
+    const stateDir = root;
+    const sessionId = "session-order";
+    await appendReductionVisualSnapshot(stateDir, {
+      kind: "reduction",
+      at: "2026-07-09T17:35:40.148Z",
+      sessionId,
+      requestId: "req-order-1",
+      model: "gpt-5.4",
+      upstreamModel: "gpt-5.4",
+      segmentId: "input-33-output",
+      itemIndex: 33,
+      field: "output",
+      savedChars: 80,
+      beforeText: "before-33",
+      afterText: "after-33",
+      report: [],
+    });
+    await appendReductionVisualSnapshot(stateDir, {
+      kind: "reduction",
+      at: "2026-07-09T17:35:40.148Z",
+      sessionId,
+      requestId: "req-order-1",
+      model: "gpt-5.4",
+      upstreamModel: "gpt-5.4",
+      segmentId: "input-41-output",
+      itemIndex: 41,
+      field: "output",
+      savedChars: 10,
+      beforeText: "before-41",
+      afterText: "after-41",
+      report: [],
+    });
+    await appendReductionVisualSnapshot(stateDir, {
+      kind: "reduction",
+      at: "2026-07-09T17:35:40.148Z",
+      sessionId,
+      requestId: "req-order-1",
+      model: "gpt-5.4",
+      upstreamModel: "gpt-5.4",
+      segmentId: "input-40-output",
+      itemIndex: 40,
+      field: "output",
+      savedChars: 200,
+      beforeText: "before-40",
+      afterText: "after-40",
+      report: [],
+    });
+
+    const data = await readVisualSessionData(stateDir, sessionId);
+    assert.equal(data.reductionCalls?.length, 1);
+    assert.deepEqual(
+      data.reductionCalls?.[0]?.segments.map((segment) => segment.segmentId),
+      ["input-41-output", "input-40-output", "input-33-output"],
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
