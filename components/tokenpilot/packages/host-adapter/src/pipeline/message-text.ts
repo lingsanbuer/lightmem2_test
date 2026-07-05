@@ -252,7 +252,7 @@ export function rewriteTextForStablePrefix(promptText: string): StablePrefixText
 
   return {
     canonicalText: canonical,
-    forwardedText: canonical,
+    forwardedText: raw,
     dynamicContextText,
     changed: canonical !== raw || dynamicContextText.length > 0,
     workdir,

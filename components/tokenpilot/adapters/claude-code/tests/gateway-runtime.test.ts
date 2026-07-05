@@ -538,8 +538,8 @@ test("gateway runtime supports developer-targeted stable-prefix injection", asyn
 
     assert.equal(requestResp.status, 200);
     assert.equal(seenPayloads.length, 1);
-    assert.match(String(seenPayloads[0]?.system ?? ""), /Your working directory is: <WORKDIR>/);
-    assert.match(String(seenPayloads[0]?.system ?? ""), /Runtime: agent=<AGENT_ID> \|/);
+    assert.match(String(seenPayloads[0]?.system ?? ""), /Your working directory is: \/tmp\/demo/);
+    assert.match(String(seenPayloads[0]?.system ?? ""), /Runtime: agent=agent-123 \|/);
     assert.match(String(seenPayloads[0]?.system ?? ""), /WORKDIR: \/tmp\/demo/);
     assert.match(String(seenPayloads[0]?.system ?? ""), /AGENT_ID: agent-123/);
 

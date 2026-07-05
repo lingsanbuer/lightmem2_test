@@ -17,10 +17,12 @@ test("rewriteRootPromptForStablePrefix canonicalizes workdir and agent identifie
   const rewritten = rewriteRootPromptForStablePrefix(raw);
 
   assert.equal(rewritten.changed, true);
-  assert.match(rewritten.forwardedPromptText, /Runtime: agent=<AGENT_ID>\| host=mistral/);
-  assert.match(rewritten.forwardedPromptText, /Your working directory is: <WORKDIR>/);
-  assert.match(rewritten.forwardedPromptText, /^## AGENTS\.md$/m);
-  assert.match(rewritten.forwardedPromptText, /\[MISSING\] Expected at: BOOTSTRAP\.md/);
+  assert.match(rewritten.canonicalPromptText, /Runtime: agent=<AGENT_ID>\| host=mistral/);
+  assert.match(rewritten.canonicalPromptText, /Your working directory is: <WORKDIR>/);
+  assert.match(rewritten.canonicalPromptText, /^## AGENTS\.md$/m);
+  assert.match(rewritten.canonicalPromptText, /\[MISSING\] Expected at: BOOTSTRAP\.md/);
+  assert.match(rewritten.forwardedPromptText, /Runtime: agent=bench-dica-gpt-5-4-mini-0123-j0002 \| host=mistral/);
+  assert.match(rewritten.forwardedPromptText, /Your working directory is: \/tmp\/pinchbench\/0123\/agent_workspace_j0002/);
   assert.equal(
     rewritten.dynamicContextText,
     "- WORKDIR: /tmp/pinchbench/0123/agent_workspace_j0002\n- AGENT_ID: bench-dica-gpt-5-4-mini-0123-j0002",
@@ -53,8 +55,8 @@ test("applyRootPromptRewriteToChatMessages rewrites system prompt and prepends d
   assert.equal(rewritten.changed, true);
   assert.equal(rewritten.systemIndex, 0);
   assert.equal(rewritten.userIndex, 1);
-  assert.match(rewritten.messages[0].content[0].text, /Your working directory is: <WORKDIR>/);
-  assert.match(rewritten.messages[0].content[0].text, /^## AGENTS\.md$/m);
+  assert.match(rewritten.messages[0].content[0].text, /Your working directory is: \/tmp\/pinchbench\/0123\/agent_workspace_j0002/);
+  assert.match(rewritten.messages[0].content[0].text, /^## \/tmp\/pinchbench\/0123\/agent_workspace_j0002\/AGENTS\.md$/m);
   assert.match(
     rewritten.messages[0].content[0].text,
     /- WORKDIR: \/tmp\/pinchbench\/0123\/agent_workspace_j0002\n- AGENT_ID: bench-dica-gpt-5-4-mini-0123-j0002/,

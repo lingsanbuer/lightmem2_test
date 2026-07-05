@@ -49,9 +49,9 @@ test("prepareCodexStablePrefix stabilizes instructions and developer prompt whil
   const prepared = prepareCodexStablePrefix(envelope, config);
 
   assert.notEqual(prepared, envelope);
-  assert.match(String(prepared.instructions ?? ""), /<WORKDIR>/);
+  assert.match(String(prepared.instructions ?? ""), /Your working directory is: \/repo\/demo/);
   assert.doesNotMatch(String(prepared.instructions ?? ""), /WORKDIR: \/repo\/demo/);
-  assert.match(String(prepared.messages[0]?.content ?? ""), /<WORKDIR>/);
+  assert.match(String(prepared.messages[0]?.content ?? ""), /Your working directory is: \/repo\/demo/);
   assert.doesNotMatch(String(prepared.messages[0]?.content ?? ""), /WORKDIR: \/repo\/demo/);
   assert.equal(prepared.messages.length, 3);
   assert.equal(prepared.messages[1]?.role, "system");
