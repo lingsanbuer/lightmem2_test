@@ -4,6 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hasCachedInputTokens, readCachedInputTokens } from "../state/cache-usage.js";
 
 export async function reserveUnusedPort(): Promise<number> {
   return await new Promise((resolve, reject) => {
@@ -53,6 +54,10 @@ export type MockJsonUpstream = {
   close(): Promise<void>;
 };
 
+export type MockCachingJsonUpstream = MockJsonUpstream & {
+  requestUsages: Array<Record<string, unknown>>;
+};
+
 export async function startMockJsonUpstream(params: {
   port?: number;
   path?: string;
@@ -99,6 +104,89 @@ export async function startMockJsonUpstream(params: {
   return {
     baseUrl: `http://127.0.0.1:${port}/v1`,
     requests,
+    close() {
+      return new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    },
+  };
+}
+
+export async function startMockCachingJsonUpstream(params?: {
+  port?: number;
+  path?: string;
+  responseFactory?(request: Record<string, unknown>, index: number): Record<string, unknown>;
+}): Promise<MockCachingJsonUpstream> {
+  const requests: Array<Record<string, unknown>> = [];
+  const requestUsages: Array<Record<string, unknown>> = [];
+  const path = params?.path ?? "/v1/responses";
+  const port = params?.port ?? await reserveUnusedPort();
+  const cacheByKey = new Map<string, number>();
+  const server = createHttpServer(async (req, res) => {
+    if (req.method !== "POST" || req.url !== path) {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    }
+
+    const request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+    requests.push(request);
+    const promptCacheKey = typeof request.prompt_cache_key === "string" ? request.prompt_cache_key : "";
+    const requestText = JSON.stringify(request.input ?? []);
+    const baseInputTokens = Math.max(32, Math.ceil(requestText.length / 12));
+    const cachedInputTokens = promptCacheKey && cacheByKey.get(promptCacheKey) === baseInputTokens
+      ? baseInputTokens
+      : 0;
+    if (promptCacheKey) cacheByKey.set(promptCacheKey, baseInputTokens);
+
+    const usage = {
+      input_tokens: baseInputTokens,
+      output_tokens: 6,
+      total_tokens: baseInputTokens + 6,
+      cached_tokens: cachedInputTokens,
+      cache_read_input_tokens: cachedInputTokens,
+      input_tokens_details: {
+        cached_tokens: cachedInputTokens,
+      },
+    };
+    requestUsages.push(usage);
+
+    const payload = params?.responseFactory?.(request, requests.length - 1) ?? {
+      id: `resp_cache_${requests.length}`,
+      object: "response",
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: `response-${requests.length}` }],
+        },
+      ],
+      usage,
+      prompt_cache_key: promptCacheKey || undefined,
+    };
+
+    res.statusCode = 200;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(payload));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return {
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    requests,
+    requestUsages,
     close() {
       return new Promise<void>((resolve) => {
         server.close(() => resolve());
@@ -189,8 +277,8 @@ export function assertStablePrefixRewrite(params: {
   workdir: string;
   agentId: string;
 }): void {
-  assert.match(params.sanitizedPromptText, /Your working directory is: <WORKDIR>/);
-  assert.match(params.sanitizedPromptText, /Runtime: agent=<AGENT_ID>\s*\|/);
+  assert.match(params.sanitizedPromptText, new RegExp(`Your working directory is: ${escapeRegExp(params.workdir)}`));
+  assert.match(params.sanitizedPromptText, new RegExp(`Runtime: agent=${escapeRegExp(params.agentId)}\\s*\\|`));
   assert.match(params.dynamicContextText, new RegExp(`WORKDIR: ${escapeRegExp(params.workdir)}`));
   assert.match(params.dynamicContextText, new RegExp(`AGENT_ID: ${escapeRegExp(params.agentId)}`));
 }
@@ -227,6 +315,16 @@ export function assertVisualText(params: {
   for (const pattern of params.requiredPatterns ?? []) {
     assert.match(params.text, pattern);
   }
+}
+
+export function assertColdWarmCacheUsage(usages: unknown[]): void {
+  assert.ok(usages.length >= 2, "expected at least two usages for cold/warm cache verification");
+  assert.equal(hasCachedInputTokens(usages[0]), false, `expected cold usage to miss cache: ${JSON.stringify(usages[0])}`);
+  assert.equal(hasCachedInputTokens(usages[1]), true, `expected warm usage to hit cache: ${JSON.stringify(usages[1])}`);
+  assert.ok(
+    readCachedInputTokens(usages[1]) > 0,
+    `expected positive cached input tokens in warm usage: ${JSON.stringify(usages[1])}`,
+  );
 }
 
 function escapeRegExp(value: string): string {
