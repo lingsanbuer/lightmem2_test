@@ -355,3 +355,436 @@ test("applyStablePrefixToMessage rewrites root prompt and injects dynamic contex
   assert.match(String(result.messages[1]?.content ?? ""), /WORKDIR: \/repo\/demo/);
   assert.match(String(result.messages[1]?.content ?? ""), /AGENT_ID: worker-123/);
 });
+
+test("extractStablePrefixContract separates stable core, semi-stable context, and volatile tail", () => {
+  const envelope: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-4",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      {
+        role: "system",
+        content: [
+          "Project protocol:",
+          "Your working directory is: /repo/demo",
+          "Runtime: agent=worker-123 | mode=interactive",
+        ].join("\n"),
+      },
+      { role: "user", content: "Fix the failing test in src/app.ts." },
+      { role: "assistant", content: "Inspecting now." },
+    ],
+    tools: [
+      { type: "function", function: { name: "b_tool", parameters: { z: 1, a: 2 } } },
+      { type: "function", function: { name: "a_tool", parameters: { b: true, a: false } } },
+    ],
+    rawPayload: {},
+  };
+
+  const contract = extractStablePrefixContract(envelope);
+
+  assert.equal(contract.stableCore.some((segment) => segment.key === "instructions"), true);
+  assert.equal(contract.stableCore.some((segment) => segment.key === "messages.0"), true);
+  assert.equal(contract.stableCore.some((segment) => segment.key === "tools"), true);
+  assert.equal(contract.semiStableContext.some((segment) => segment.key === "model"), true);
+  assert.equal(contract.semiStableContext.some((segment) => segment.key === "session.host"), true);
+  assert.equal(contract.semiStableContext.some((segment) => segment.key === "instructions.dynamic_context"), true);
+  assert.equal(contract.volatileTail.some((segment) => segment.key === "messages.1"), true);
+  assert.equal(contract.volatileTail.some((segment) => segment.key === "messages.2"), true);
+  assert.match(
+    String(contract.stableCore.find((segment) => segment.key === "instructions")?.text ?? ""),
+    /<WORKDIR>/,
+  );
+  assert.match(
+    String(contract.semiStableContext.find((segment) => segment.key === "instructions.dynamic_context")?.text ?? ""),
+    /WORKDIR: <WORKDIR>/,
+  );
+  assert.match(
+    String(contract.semiStableContext.find((segment) => segment.key === "instructions.dynamic_context")?.text ?? ""),
+    /AGENT_ID: <AGENT_ID>/,
+  );
+});
+
+test("extractStablePrefixContract serializes tools deterministically for stable core", () => {
+  const envelopeA: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-5",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    messages: [{ role: "user", content: "hello" }],
+    tools: [
+      { function: { parameters: { z: 1, a: 2 }, name: "tool_a" }, type: "function" },
+    ],
+    rawPayload: {},
+  };
+  const envelopeB: HostRequestEnvelope = {
+    ...envelopeA,
+    tools: [
+      { type: "function", function: { name: "tool_a", parameters: { a: 2, z: 1 } } },
+    ],
+  };
+
+  const toolsA = extractStablePrefixContract(envelopeA).stableCore.find((segment) => segment.key === "tools")?.text;
+  const toolsB = extractStablePrefixContract(envelopeB).stableCore.find((segment) => segment.key === "tools")?.text;
+
+  assert.equal(toolsA, toolsB);
+});
+
+test("prepareBeforeCall canonicalizes tool order before forwarding", async () => {
+  const envelope: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-tools-canonical",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    messages: [{ role: "user", content: "hello" }],
+    tools: [
+      { type: "function", function: { name: "z_tool", parameters: { z: 1, a: 2 } } },
+      { type: "function", function: { name: "a_tool", parameters: { b: true, a: false } } },
+    ],
+    rawPayload: {},
+  };
+
+  const prepared = await prepareBeforeCall({ envelope, config: { mode: "normal" } });
+  const tools = prepared.envelope.tools as Array<Record<string, any>>;
+
+  assert.equal(Array.isArray(tools), true);
+  assert.equal(tools[0]?.function?.name, "a_tool");
+  assert.equal(tools[1]?.function?.name, "z_tool");
+  assert.deepEqual(tools[0]?.function?.parameters, { a: false, b: true });
+  assert.deepEqual(tools[1]?.function?.parameters, { a: 2, z: 1 });
+});
+
+test("canonicalizeTools returns stable order and nested key order", () => {
+  const tools = canonicalizeTools([
+    { type: "function", function: { name: "b_tool", parameters: { z: 1, a: 2 } } },
+    { type: "function", function: { name: "a_tool", parameters: { b: true, a: false } } },
+  ]) as Array<Record<string, any>>;
+
+  assert.equal(tools[0]?.function?.name, "a_tool");
+  assert.equal(tools[1]?.function?.name, "b_tool");
+  assert.deepEqual(tools[0]?.function?.parameters, { a: false, b: true });
+  assert.deepEqual(tools[1]?.function?.parameters, { a: 2, z: 1 });
+});
+
+test("normalizeStablePrefixText rewrites home, skill, and generic absolute paths", () => {
+  const previousHome = process.env.HOME;
+  process.env.HOME = "/home/tester";
+  try {
+    const normalized = normalizeStablePrefixText(
+      [
+        "cwd=/repo/demo/src/app.ts",
+        "skill=/home/tester/.codex/skills/openai-docs/SKILL.md",
+        "lib=/tmp/build/node_modules/pkg/index.js",
+        "other=/var/log/tokenpilot/debug.log",
+      ].join("\n"),
+      { workdir: "/repo/demo" },
+    );
+
+    assert.match(normalized, /cwd=<WORKDIR>\/src\/app\.ts/);
+    assert.match(normalized, /skill=<CODEX_SKILLS>\/openai-docs\/SKILL\.md/);
+    assert.match(normalized, /lib=<NODE_MODULES>\/pkg\/index\.js/);
+    assert.match(normalized, /other=<ABS_PATH>\/tokenpilot\/debug\.log/);
+    assert.doesNotMatch(normalized, /\/home\/tester/);
+    assert.doesNotMatch(normalized, /\/var\/log\/tokenpilot/);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test("extractStablePrefixContract normalizes absolute paths inside tools", () => {
+  const previousHome = process.env.HOME;
+  process.env.HOME = "/home/tester";
+  try {
+    const envelope: HostRequestEnvelope = {
+      session: {
+        host: { hostId: "codex", displayName: "Codex" },
+        sessionId: "session-tools-paths",
+        sessionMode: "single",
+      },
+      model: "gpt-5.4",
+      stream: true,
+      messages: [{ role: "user", content: "hello" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "read_skill",
+            description: "Open /home/tester/.codex/skills/openai-docs/SKILL.md from /repo/demo/docs/README.md",
+            parameters: {
+              type: "object",
+              properties: {
+                path: {
+                  type: "string",
+                  description: "Absolute path like /var/log/tokenpilot/debug.log",
+                },
+              },
+            },
+          },
+        },
+      ],
+      rawPayload: {},
+    };
+
+    const toolText = extractStablePrefixContract(envelope).stableCore.find((segment) => segment.key === "tools")?.text ?? "";
+    assert.match(toolText, /<CODEX_SKILLS>\/openai-docs\/SKILL\.md/);
+    assert.match(toolText, /<ABS_PATH>\/tokenpilot\/debug\.log/);
+    assert.match(toolText, /<ABS_PATH>\/docs\/README\.md/);
+    assert.doesNotMatch(toolText, /\/home\/tester/);
+    assert.doesNotMatch(toolText, /\/var\/log\/tokenpilot/);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
+test("stable prefix fingerprint ignores volatile tail changes", () => {
+  const base: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-6",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      {
+        role: "system",
+        content: "Project protocol.\nYour working directory is: /repo/demo\nRuntime: agent=worker-123 | mode=interactive",
+      },
+      { role: "user", content: "first question" },
+      { role: "assistant", content: "first answer" },
+    ],
+    rawPayload: {},
+  };
+  const changedTail: HostRequestEnvelope = {
+    ...base,
+    messages: [
+      base.messages[0],
+      { role: "user", content: "second question" },
+      { role: "assistant", content: "second answer" },
+    ],
+  };
+
+  assert.equal(
+    fingerprintStablePrefixEnvelope(base),
+    fingerprintStablePrefixEnvelope(changedTail),
+  );
+});
+
+test("stable prefix fingerprint ignores runtime-only workdir and agent changes", () => {
+  const base: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-7",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      { role: "system", content: "Project protocol." },
+      { role: "user", content: "hello" },
+    ],
+    rawPayload: {},
+  };
+  const changedStable: HostRequestEnvelope = {
+    ...base,
+    instructions: [
+      "You are the coding agent.",
+      "Your working directory is: /repo/other",
+      "Runtime: agent=worker-999 | mode=interactive",
+    ].join("\n"),
+  };
+
+  assert.equal(
+    fingerprintStablePrefixEnvelope(base),
+    fingerprintStablePrefixEnvelope(changedStable),
+  );
+});
+
+test("stable prefix fingerprint changes when stable non-runtime instructions change", () => {
+  const base: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-7b",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    instructions: [
+      "You are the coding agent.",
+      "Follow repository protocol alpha.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+    messages: [
+      { role: "system", content: "Project protocol." },
+      { role: "user", content: "hello" },
+    ],
+    rawPayload: {},
+  };
+  const changedStable: HostRequestEnvelope = {
+    ...base,
+    instructions: [
+      "You are the coding agent.",
+      "Follow repository protocol beta.",
+      "Your working directory is: /repo/demo",
+      "Runtime: agent=worker-123 | mode=interactive",
+    ].join("\n"),
+  };
+
+  assert.notEqual(
+    fingerprintStablePrefixEnvelope(base),
+    fingerprintStablePrefixEnvelope(changedStable),
+  );
+});
+
+test("serializeStablePrefixEnvelope excludes volatile tail content", () => {
+  const envelope: HostRequestEnvelope = {
+    session: {
+      host: { hostId: "codex", displayName: "Codex" },
+      sessionId: "session-8",
+      sessionMode: "single",
+    },
+    model: "gpt-5.4",
+    stream: true,
+    messages: [
+      { role: "system", content: "Your working directory is: /repo/demo" },
+      { role: "user", content: "volatile user content" },
+      { role: "assistant", content: "volatile assistant content" },
+    ],
+    rawPayload: {},
+  };
+
+  const serialized = serializeStablePrefixEnvelope(envelope);
+  const raw = JSON.stringify(serialized);
+
+  assert.match(raw, /<WORKDIR>/);
+  assert.doesNotMatch(raw, /volatile user content/);
+  assert.doesNotMatch(raw, /volatile assistant content/);
+});
+
+test("auditStablePrefixEntropy finds absolute paths, timestamps, and UUIDs in stable prefix", () => {
+  const findings = auditStablePrefixEntropy({
+    schemaVersion: 1,
+    stableCore: [
+      {
+        key: "instructions",
+        source: "instructions",
+        text: "Path: /repo/demo\nSeen at 2026-07-05T10:11:12Z\nRun UUID: 123e4567-e89b-12d3-a456-426614174000",
+      },
+    ],
+    semiStableContext: [],
+  });
+
+  assert.equal(findings.some((item) => item.kind === "abs_path"), true);
+  assert.equal(findings.some((item) => item.kind === "timestamp"), true);
+  assert.equal(findings.some((item) => item.kind === "uuid"), true);
+});
+
+test("auditStablePrefixEntropy ignores placeholder-normalized paths", () => {
+  const serialized: SerializedStablePrefixContract = {
+    schemaVersion: 1,
+    stableCore: [
+      {
+        key: "tools",
+        source: "tools",
+        text: "cwd=<WORKDIR>/src\nskill=<CODEX_SKILLS>/openai-docs/SKILL.md\nlog=<ABS_PATH>/tokenpilot/debug.log",
+      },
+    ],
+    semiStableContext: [],
+  };
+  const findings = auditStablePrefixEntropy(serialized);
+
+  assert.equal(findings.some((item) => item.kind === "abs_path"), false);
+});
+
+test("auditStablePrefixEntropy flags non-canonical tool ordering", () => {
+  const serialized: SerializedStablePrefixContract = {
+    schemaVersion: 1,
+    stableCore: [
+      {
+        key: "tools",
+        source: "tools",
+        text: JSON.stringify([
+          { type: "function", function: { name: "b_tool", parameters: { z: 1, a: 2 } } },
+          { type: "function", function: { name: "a_tool", parameters: { b: true, a: false } } },
+        ]),
+      },
+    ],
+    semiStableContext: [],
+  };
+
+  const findings = auditStablePrefixEntropy(serialized);
+  assert.equal(findings.some((item) => item.kind === "tooling_order_risk"), true);
+});
+
+test("auditStablePrefixEntropy does not flag canonical tool ordering", () => {
+  const serialized: SerializedStablePrefixContract = {
+    schemaVersion: 1,
+    stableCore: [
+      {
+        key: "tools",
+        source: "tools",
+        text: JSON.stringify(canonicalizeTools([
+          { type: "function", function: { name: "b_tool", parameters: { z: 1, a: 2 } } },
+          { type: "function", function: { name: "a_tool", parameters: { b: true, a: false } } },
+        ])),
+      },
+    ],
+    semiStableContext: [],
+  };
+
+  const findings = auditStablePrefixEntropy(serialized);
+  assert.equal(findings.some((item) => item.kind === "tooling_order_risk"), false);
+});
+
+test("diffStablePrefixSerialized explains text and segment drift", () => {
+  const previous: SerializedStablePrefixContract = {
+    schemaVersion: 1 as const,
+    stableCore: [
+      { key: "instructions", source: "instructions", text: "A" },
+    ],
+    semiStableContext: [
+      { key: "model", source: "model", text: "gpt-5.4" },
+    ],
+  };
+  const current: SerializedStablePrefixContract = {
+    schemaVersion: 1 as const,
+    stableCore: [
+      { key: "instructions", source: "instructions", text: "B" },
+      { key: "tools", source: "tools", text: "[]" },
+    ],
+    semiStableContext: [],
+  };
+
+  const reasons = diffStablePrefixSerialized(previous, current);
+
+  assert.equal(reasons.some((item) => item.kind === "segment_text_changed" && item.key === "instructions"), true);
+  assert.equal(reasons.some((item) => item.kind === "segment_added" && item.key === "tools"), true);
+  assert.equal(reasons.some((item) => item.kind === "segment_removed" && item.key === "model"), true);
+});
