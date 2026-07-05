@@ -1,5 +1,11 @@
 import { readdir, readFile, mkdir, appendFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import {
+  readRecentCacheAuditRecordsForSession,
+  summarizeCacheAudit,
+  type CacheAuditRecord,
+  type CacheAuditSummary,
+} from "@tokenpilot/host-adapter";
 import { readRecentReductionMetrics, summarizeRecentReductionMetrics, type RecentReductionMetricsSummary } from "../metrics.js";
 
 async function appendJsonl(path: string, payload: unknown): Promise<void> {
@@ -102,16 +108,216 @@ export type VisualSessionSummary = {
   tokenSavedCount?: number;
   charOptimizedTurns?: number;
   charSavedCount?: number;
+  cacheAuditSummary?: CacheAuditSummary | null;
 };
 
 export type VisualSessionData = {
   sessionId: string;
   stability: StabilityVisualSnapshot[];
   reduction: ReductionVisualSnapshot[];
+  reductionCalls?: VisualReductionCallGroup[];
   eviction: EvictionVisualSnapshot[];
   uxAggregate?: VisualUxAggregate | null;
   recentReduction?: RecentReductionMetricsSummary | null;
+  cacheAuditSummary?: CacheAuditSummary | null;
+  recentCacheAudit?: VisualCacheAuditEntry[];
+  recentCacheAuditGroups?: VisualCacheAuditGroup[];
 };
+
+export type VisualReductionCallGroup = {
+  requestId: string;
+  at: string;
+  model: string;
+  upstreamModel: string;
+  totalSavedChars: number;
+  segmentCount: number;
+  toolNames: string[];
+  routes: string[];
+  dataPaths: string[];
+  segments: ReductionVisualSnapshot[];
+};
+
+export type VisualCacheAuditEntry = {
+  at: string;
+  model: string;
+  stream: boolean;
+  stablePrefixFingerprint: string;
+  requestPromptCacheKey: string | null;
+  responsePromptCacheKey: string | null;
+  cachedInputTokens: number;
+  status: number;
+  entropyKinds: string[];
+  driftKeys: string[];
+};
+
+export type VisualCacheAuditGroup = {
+  stablePrefixFingerprint: string;
+  latestAt: string;
+  latestModel: string;
+  requestCount: number;
+  warmHitCount: number;
+  rewriteCount: number;
+  requestPromptCacheKeys: string[];
+  responsePromptCacheKeys: string[];
+  entropyKinds: string[];
+  driftKeys: string[];
+};
+
+function toVisualCacheAuditEntry(record: CacheAuditRecord): VisualCacheAuditEntry {
+  return {
+    at: record.at,
+    model: record.model,
+    stream: record.stream,
+    stablePrefixFingerprint: record.stablePrefixFingerprint,
+    requestPromptCacheKey: record.requestPromptCacheKey,
+    responsePromptCacheKey: record.responsePromptCacheKey,
+    cachedInputTokens: Number(record.cachedInputTokens ?? 0),
+    status: Number(record.status ?? 0),
+    entropyKinds: Array.isArray(record.entropyFindings)
+      ? record.entropyFindings.map((entry) => String(entry.kind || "")).filter(Boolean)
+      : [],
+    driftKeys: Array.isArray(record.driftReasons)
+      ? record.driftReasons.map((entry) => String(entry.key || "")).filter(Boolean)
+      : [],
+  };
+}
+
+function stableUnique(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function reductionSnapshotIdentity(snapshot: ReductionVisualSnapshot): string {
+  return JSON.stringify([
+    snapshot.requestId,
+    snapshot.segmentId,
+    snapshot.itemIndex,
+    snapshot.field,
+    snapshot.blockIndex ?? null,
+    snapshot.blockKey ?? null,
+    snapshot.toolName ?? null,
+    snapshot.dataPath ?? null,
+    snapshot.savedChars,
+    snapshot.route ?? null,
+    snapshot.routeReason ?? null,
+    snapshot.beforeText,
+    snapshot.afterText,
+    snapshot.passSavedChars ?? null,
+    snapshot.report ?? [],
+  ]);
+}
+
+function dedupeReductionSnapshots(
+  snapshots: ReductionVisualSnapshot[],
+): ReductionVisualSnapshot[] {
+  const seen = new Set<string>();
+  const out: ReductionVisualSnapshot[] = [];
+  for (const snapshot of sortByAtDesc(snapshots)) {
+    const identity = reductionSnapshotIdentity(snapshot);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    out.push(snapshot);
+  }
+  return out;
+}
+
+function groupReductionSnapshotsByRequest(
+  snapshots: ReductionVisualSnapshot[],
+): VisualReductionCallGroup[] {
+  const groups = new Map<string, VisualReductionCallGroup>();
+  for (const snapshot of sortByAtDesc(snapshots)) {
+    const requestId = String(snapshot.requestId || "").trim() || "(unknown)";
+    const current = groups.get(requestId) ?? {
+      requestId,
+      at: snapshot.at,
+      model: snapshot.model,
+      upstreamModel: snapshot.upstreamModel,
+      totalSavedChars: 0,
+      segmentCount: 0,
+      toolNames: [],
+      routes: [],
+      dataPaths: [],
+      segments: [],
+    };
+    if (String(snapshot.at) > current.at) {
+      current.at = snapshot.at;
+      current.model = snapshot.model;
+      current.upstreamModel = snapshot.upstreamModel;
+    }
+    current.totalSavedChars += Number(snapshot.savedChars ?? 0);
+    current.segmentCount += 1;
+    current.toolNames = stableUnique([...current.toolNames, snapshot.toolName ?? ""]);
+    current.routes = stableUnique([...current.routes, snapshot.route ?? ""]);
+    current.dataPaths = stableUnique([...current.dataPaths, snapshot.dataPath ?? ""]);
+    current.segments.push(snapshot);
+    groups.set(requestId, current);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      segments: sortByAtDesc(group.segments),
+    }))
+    .sort((left, right) => String(right.at).localeCompare(String(left.at)));
+}
+
+function groupVisualCacheAuditEntries(
+  entries: VisualCacheAuditEntry[],
+): VisualCacheAuditGroup[] {
+  const groups = new Map<string, VisualCacheAuditGroup>();
+  for (const entry of entries) {
+    const fingerprint = String(entry.stablePrefixFingerprint || "").trim() || "(unknown)";
+    const current = groups.get(fingerprint) ?? {
+      stablePrefixFingerprint: fingerprint,
+      latestAt: entry.at,
+      latestModel: entry.model,
+      requestCount: 0,
+      warmHitCount: 0,
+      rewriteCount: 0,
+      requestPromptCacheKeys: [],
+      responsePromptCacheKeys: [],
+      entropyKinds: [],
+      driftKeys: [],
+    };
+    current.requestCount += 1;
+    if (Number(entry.cachedInputTokens ?? 0) > 0) current.warmHitCount += 1;
+    if (
+      entry.requestPromptCacheKey
+      && entry.responsePromptCacheKey
+      && entry.requestPromptCacheKey !== entry.responsePromptCacheKey
+    ) {
+      current.rewriteCount += 1;
+    }
+    if (String(entry.at) > current.latestAt) {
+      current.latestAt = entry.at;
+      current.latestModel = entry.model;
+    }
+    current.requestPromptCacheKeys = stableUnique([
+      ...current.requestPromptCacheKeys,
+      entry.requestPromptCacheKey ?? "",
+    ]);
+    current.responsePromptCacheKeys = stableUnique([
+      ...current.responsePromptCacheKeys,
+      entry.responsePromptCacheKey ?? "",
+    ]);
+    current.entropyKinds = stableUnique([
+      ...current.entropyKinds,
+      ...(Array.isArray(entry.entropyKinds) ? entry.entropyKinds : []),
+    ]);
+    current.driftKeys = stableUnique([
+      ...current.driftKeys,
+      ...(Array.isArray(entry.driftKeys) ? entry.driftKeys : []),
+    ]);
+    groups.set(fingerprint, current);
+  }
+  return [...groups.values()].sort((left, right) => String(right.latestAt).localeCompare(String(left.latestAt)));
+}
 
 function encodeSessionId(sessionId: string): string {
   return encodeURIComponent(String(sessionId || "").trim() || "session");
@@ -225,19 +431,29 @@ export async function appendEvictionVisualSnapshot(stateDir: string, snapshot: E
 
 export async function readVisualSessionData(stateDir: string, sessionId: string): Promise<VisualSessionData> {
   const stability = sortByAtDesc(await readSnapshotFile<StabilityVisualSnapshot>(snapshotCandidates(stateDir, "stability", sessionId)));
-  const reduction = sortByAtDesc(await readSnapshotFile<ReductionVisualSnapshot>(snapshotCandidates(stateDir, "reduction", sessionId)));
+  const reduction = dedupeReductionSnapshots(
+    await readSnapshotFile<ReductionVisualSnapshot>(snapshotCandidates(stateDir, "reduction", sessionId)),
+  );
   const eviction = sortByAtDesc(await readSnapshotFile<EvictionVisualSnapshot>(snapshotCandidates(stateDir, "eviction", sessionId)));
-  const [uxAggregate, recentMetrics] = await Promise.all([
+  const [uxAggregate, recentMetrics, cacheAuditRecords] = await Promise.all([
     readJsonFile<VisualUxAggregate>(uxAggregateCandidates(stateDir, sessionId)),
     readRecentReductionMetrics(stateDir, sessionId),
+    readRecentCacheAuditRecordsForSession(stateDir, sessionId, 64),
   ]);
+  const cacheAuditSummary = cacheAuditRecords.length > 0 ? summarizeCacheAudit(cacheAuditRecords) : null;
+  const recentCacheAudit = sortByAtDesc(cacheAuditRecords).slice(0, 8).map(toVisualCacheAuditEntry);
+  const reductionCalls = groupReductionSnapshotsByRequest(reduction);
   return {
     sessionId,
     stability,
     reduction,
+    reductionCalls,
     eviction,
     uxAggregate,
     recentReduction: recentMetrics ? summarizeRecentReductionMetrics(recentMetrics) : null,
+    cacheAuditSummary,
+    recentCacheAudit,
+    recentCacheAuditGroups: groupVisualCacheAuditEntries(recentCacheAudit),
   };
 }
 
@@ -260,6 +476,7 @@ export async function readVisualSessionList(stateDir: string): Promise<VisualSes
       tokenSavedCount: 0,
       charOptimizedTurns: 0,
       charSavedCount: 0,
+      cacheAuditSummary: null,
     };
     if (kind === "stability") {
       const snapshots = await readSnapshotFile<StabilityVisualSnapshot>(snapshotCandidates(stateDir, "stability", sessionId));
@@ -268,9 +485,11 @@ export async function readVisualSessionList(stateDir: string): Promise<VisualSes
       const latestAt = latestAtOf(snapshots);
       if (latestAt > summary.lastAt) summary.lastAt = latestAt;
     } else if (kind === "reduction") {
-      const snapshots = await readSnapshotFile<ReductionVisualSnapshot>(snapshotCandidates(stateDir, "reduction", sessionId));
+      const snapshots = dedupeReductionSnapshots(
+        await readSnapshotFile<ReductionVisualSnapshot>(snapshotCandidates(stateDir, "reduction", sessionId)),
+      );
       if (snapshots.length === 0) return;
-      summary.reductionCount = snapshots.length;
+      summary.reductionCount = groupReductionSnapshotsByRequest(snapshots).length;
       const latestAt = latestAtOf(snapshots);
       if (latestAt > summary.lastAt) summary.lastAt = latestAt;
     } else {
@@ -294,7 +513,13 @@ export async function readVisualSessionList(stateDir: string): Promise<VisualSes
   }
 
   await Promise.all([...summaryBySessionId.values()].map(async (summary) => {
-    const uxAggregate = await readJsonFile<VisualUxAggregate>(uxAggregateCandidates(stateDir, summary.sessionId));
+    const [uxAggregate, cacheAuditSummary] = await Promise.all([
+      readJsonFile<VisualUxAggregate>(uxAggregateCandidates(stateDir, summary.sessionId)),
+      readRecentCacheAuditRecordsForSession(stateDir, summary.sessionId, 64).then((records) => (
+        records.length > 0 ? summarizeCacheAudit(records) : null
+      )),
+    ]);
+    summary.cacheAuditSummary = cacheAuditSummary;
     if (!uxAggregate) return;
     summary.latestCountMode = typeof uxAggregate.latestCountMode === "string"
       ? uxAggregate.latestCountMode

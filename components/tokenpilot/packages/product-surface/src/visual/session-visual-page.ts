@@ -450,6 +450,8 @@ export function renderVisualPageScript(): string {
   sessionData: new Map(),
   lastSessionByHost: {},
   collapsed: false,
+  reductionSegmentsExpanded: false,
+  fingerprintGroupsExpanded: false,
 };
 
 const el = {
@@ -573,6 +575,103 @@ function renderDiffBlock(title, beforeText, afterText) {
     + '</div></div>';
 }
 
+function renderCacheAuditPanel(cacheAuditSummary) {
+  if (!cacheAuditSummary) return "";
+  const entropy = Array.isArray(cacheAuditSummary.topEntropyKinds) && cacheAuditSummary.topEntropyKinds.length > 0
+    ? cacheAuditSummary.topEntropyKinds.map((entry) => entry.key + "=" + fmtInt(entry.count)).join(", ")
+    : "(none)";
+  const drift = Array.isArray(cacheAuditSummary.topDriftKeys) && cacheAuditSummary.topDriftKeys.length > 0
+    ? cacheAuditSummary.topDriftKeys.map((entry) => entry.key + "=" + fmtInt(entry.count)).join(", ")
+    : "(none)";
+  const rewriteCount = Number(
+    cacheAuditSummary.responsePromptCacheKeyRewriteCount
+    ?? cacheAuditSummary.promptCacheKeyMismatchCount
+    ?? 0,
+  );
+  return '<div class="pass-list" style="margin-top:16px;">'
+    + '<div class="pass-item"><strong>Cache Audit</strong><br />'
+    + 'warm hits=' + escapeHtml(fmtInt(cacheAuditSummary.warmHits || 0))
+    + ' / ' + escapeHtml(fmtInt(cacheAuditSummary.warmCandidates || 0))
+    + ' · misses=' + escapeHtml(fmtInt(cacheAuditSummary.warmMisses || 0))
+    + ' · hit rate=' + escapeHtml(String(cacheAuditSummary.hitRatePercent || 0)) + '%'
+    + '<br />response key rewrites=' + escapeHtml(fmtInt(rewriteCount))
+    + '<br />entropy hotspots=' + escapeHtml(entropy)
+    + '<br />drift hotspots=' + escapeHtml(drift)
+    + '</div>'
+    + '</div>';
+}
+
+function renderCacheAuditRecentTable(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return "";
+  return '<div class="pass-list" style="margin-top:16px;">'
+    + entries.map((entry, index) => {
+      const requestKey = entry.requestPromptCacheKey || "-";
+      const responseKey = entry.responsePromptCacheKey || "-";
+      const entropy = Array.isArray(entry.entropyKinds) && entry.entropyKinds.length > 0
+        ? entry.entropyKinds.join(", ")
+        : "(none)";
+      const drift = Array.isArray(entry.driftKeys) && entry.driftKeys.length > 0
+        ? entry.driftKeys.join(", ")
+        : "(none)";
+      return '<div class="pass-item"><strong>Recent Cache Request #' + escapeHtml(String(index + 1)) + '</strong>'
+        + '<br />at=' + escapeHtml(fmtDate(entry.at))
+        + ' · status=' + escapeHtml(fmtInt(entry.status))
+        + ' · cached tokens=' + escapeHtml(fmtInt(entry.cachedInputTokens))
+        + ' · stream=' + escapeHtml(String(Boolean(entry.stream)))
+        + '<br />model=' + escapeHtml(entry.model || "-")
+        + ' · fingerprint=' + escapeHtml(entry.stablePrefixFingerprint || "-")
+        + '<br />request key=' + escapeHtml(requestKey)
+        + '<br />response key=' + escapeHtml(responseKey)
+        + '<br />entropy=' + escapeHtml(entropy)
+        + '<br />drift=' + escapeHtml(drift)
+        + '</div>';
+    }).join("")
+    + '</div>';
+}
+
+function renderCacheAuditFingerprintGroups(groups) {
+  if (!Array.isArray(groups) || groups.length === 0) return "";
+  const visibleGroups = state.fingerprintGroupsExpanded ? groups : groups.slice(0, 1);
+  return '<div class="pass-list" style="margin-top:16px;">'
+    + visibleGroups.map((group, index) => {
+      const groupNumber = index + 1;
+      const isLatest = index === 0;
+      const requestKeys = Array.isArray(group.requestPromptCacheKeys) && group.requestPromptCacheKeys.length > 0
+        ? group.requestPromptCacheKeys.join(", ")
+        : "(none)";
+      const responseKeys = Array.isArray(group.responsePromptCacheKeys) && group.responsePromptCacheKeys.length > 0
+        ? group.responsePromptCacheKeys.join(", ")
+        : "(none)";
+      const entropy = Array.isArray(group.entropyKinds) && group.entropyKinds.length > 0
+        ? group.entropyKinds.join(", ")
+        : "(none)";
+      const drift = Array.isArray(group.driftKeys) && group.driftKeys.length > 0
+        ? group.driftKeys.join(", ")
+        : "(none)";
+      return '<div class="pass-item"><strong>Fingerprint Group #' + escapeHtml(String(groupNumber)) + '</strong>'
+        + (isLatest ? ' · latest' : '')
+        + '<br />fingerprint=' + escapeHtml(group.stablePrefixFingerprint || "-")
+        + ' · requests=' + escapeHtml(fmtInt(group.requestCount))
+        + ' · warm hits=' + escapeHtml(fmtInt(group.warmHitCount))
+        + ' · rewrites=' + escapeHtml(fmtInt(group.rewriteCount))
+        + '<br />latest=' + escapeHtml(fmtDate(group.latestAt))
+        + ' · model=' + escapeHtml(group.latestModel || "-")
+        + '<br />request keys=' + escapeHtml(requestKeys)
+        + '<br />response keys=' + escapeHtml(responseKeys)
+        + '<br />entropy=' + escapeHtml(entropy)
+        + '<br />drift=' + escapeHtml(drift)
+        + '</div>';
+    }).join("")
+    + (groups.length > 1
+      ? '<button id="toggleFingerprintGroupsBtn" class="nav-btn" type="button" style="margin-top:8px;">'
+        + escapeHtml(state.fingerprintGroupsExpanded
+          ? 'Show fewer fingerprint groups'
+          : 'Show all ' + fmtInt(groups.length) + ' fingerprint groups')
+        + '</button>'
+      : '')
+    + '</div>';
+}
+
 async function fetchJson(path) {
   const response = await fetch(path);
   if (!response.ok) throw new Error("HTTP " + response.status);
@@ -637,6 +736,9 @@ function renderHostOverview() {
   el.overviewRoot.innerHTML = state.hosts.map((host) => {
     const active = host.hostId === state.activeHost ? " active" : "";
     const savings = savingsSummary(host);
+    const cache = host.cacheWarmCandidates > 0
+      ? 'cache ' + fmtInt(host.cacheWarmHits) + '/' + fmtInt(host.cacheWarmCandidates) + ' (' + host.cacheHitRatePercent + '%)'
+      : '';
     return '<button class="overview-card' + active + '" data-host-id="' + escapeHtml(host.hostId) + '" type="button">'
       + '<div class="overview-label">' + escapeHtml(host.displayName) + '</div>'
       + '<div class="overview-value">' + escapeHtml(fmtInt(host.sessionCount)) + '</div>'
@@ -646,6 +748,7 @@ function renderHostOverview() {
       + '<span>E ' + escapeHtml(fmtInt(host.evictionCount)) + '</span>'
       + '</div>'
       + (savings ? '<div class="overview-meta"><span>' + escapeHtml(savings) + '</span></div>' : '')
+      + (cache ? '<div class="overview-meta"><span>' + escapeHtml(cache) + '</span></div>' : '')
       + '<div class="overview-meta">'
       + '<span>latest ' + escapeHtml(fmtDate(host.latestAt) || "-") + '</span>'
       + '</div>'
@@ -699,9 +802,12 @@ function renderSessionList() {
   el.sessionList.innerHTML = state.sessions.map((session, index) => {
     const active = session.sessionId === state.activeSessionId ? "active" : "";
     const savings = savingsSummary(session);
+    const cache = session.cacheAuditSummary && session.cacheAuditSummary.warmCandidates > 0
+      ? '<span>C ' + fmtInt(session.cacheAuditSummary.warmHits) + '/' + fmtInt(session.cacheAuditSummary.warmCandidates) + '</span>'
+      : '';
     return '<button class="session-item ' + active + '" data-session-id="' + escapeHtml(session.sessionId) + '" data-index="' + (index + 1) + '" type="button">'
       + '<div class="session-id">' + escapeHtml(session.sessionId) + '</div>'
-      + '<div class="session-meta"><span>S ' + fmtInt(session.stabilityCount) + '</span><span>R ' + fmtInt(session.reductionCount) + '</span><span>E ' + fmtInt(session.evictionCount) + '</span>' + (savings ? '<span>' + escapeHtml(savings) + '</span>' : '') + '<span>' + escapeHtml(fmtDate(session.lastAt)) + '</span></div>'
+      + '<div class="session-meta"><span>S ' + fmtInt(session.stabilityCount) + '</span><span>R ' + fmtInt(session.reductionCount) + '</span><span>E ' + fmtInt(session.evictionCount) + '</span>' + cache + (savings ? '<span>' + escapeHtml(savings) + '</span>' : '') + '<span>' + escapeHtml(fmtDate(session.lastAt)) + '</span></div>'
       + '</button>';
   }).join("");
   el.sessionList.querySelectorAll(".session-item").forEach((node) => {
@@ -715,7 +821,7 @@ function activeItems() {
   const data = state.sessionData.get((state.activeHost || "") + "::" + state.activeSessionId);
   if (!data) return [];
   if (state.activeTab === "stability") return data.stability || [];
-  if (state.activeTab === "reduction") return data.reduction || [];
+  if (state.activeTab === "reduction") return data.reductionCalls || [];
   return data.eviction || [];
 }
 
@@ -755,6 +861,10 @@ el.hostSelect.addEventListener("change", async () => {
 });
 
 function renderStability(item) {
+  const data = state.sessionData.get((state.activeHost || "") + "::" + state.activeSessionId) || {};
+  const cacheAuditSummary = data.cacheAuditSummary || null;
+  const recentCacheAudit = data.recentCacheAudit || [];
+  const recentCacheAuditGroups = data.recentCacheAuditGroups || [];
   el.panelTitle.textContent = "Stability";
   el.panelMeta.innerHTML = '<span>' + escapeHtml(fmtDate(item.at)) + '</span>'
     + '<span>target ' + escapeHtml(item.dynamicContextTarget) + '</span>'
@@ -770,11 +880,23 @@ function renderStability(item) {
     + renderDiffBlock("Root Prompt -> Canonical", item.developerBefore, item.developerCanonical)
     + renderDiffBlock("Canonical -> Forwarded", item.developerCanonical, item.developerForwarded)
     + '</div>';
-  el.passRoot.innerHTML = item.dynamicContextText
+  const dynamicContextBlock = item.dynamicContextText
     ? '<div class="pass-list" style="margin-top:16px;">'
       + '<div class="diff-block"><div class="pane-label">Dynamic Context</div><pre>' + escapeHtml(item.dynamicContextText || "") + '</pre></div>'
       + '</div>'
     : "";
+  el.passRoot.innerHTML =
+    dynamicContextBlock
+    + renderCacheAuditPanel(cacheAuditSummary)
+    + renderCacheAuditFingerprintGroups(recentCacheAuditGroups)
+    + renderCacheAuditRecentTable(recentCacheAudit);
+  const toggleFingerprintGroupsBtn = document.getElementById("toggleFingerprintGroupsBtn");
+  if (toggleFingerprintGroupsBtn) {
+    toggleFingerprintGroupsBtn.addEventListener("click", () => {
+      state.fingerprintGroupsExpanded = !state.fingerprintGroupsExpanded;
+      renderActiveView();
+    });
+  }
 }
 
 function countModeMetaLabel(mode) {
@@ -785,20 +907,29 @@ function renderReduction(item) {
   const data = state.sessionData.get((state.activeHost || "") + "::" + state.activeSessionId) || {};
   const recentReduction = data.recentReduction || null;
   const uxAggregate = data.uxAggregate || null;
-  const passes = Array.isArray(item.report) ? item.report : [];
+  const cacheAuditSummary = data.cacheAuditSummary || null;
+  const recentCacheAudit = data.recentCacheAudit || [];
+  const recentCacheAuditGroups = data.recentCacheAuditGroups || [];
+  const segments = Array.isArray(item.segments) ? item.segments : [];
+  const visibleSegments = state.reductionSegmentsExpanded ? segments : segments.slice(0, 1);
+  const primarySegment = segments[0] || null;
+  const passes = primarySegment && Array.isArray(primarySegment.report) ? primarySegment.report : [];
   const changedPasses = passes.filter((entry) => entry && entry.changed);
+  const toolSummary = Array.isArray(item.toolNames) && item.toolNames.length > 0 ? item.toolNames.join(", ") : "-";
+  const routeSummary = Array.isArray(item.routes) && item.routes.length > 0 ? item.routes.join(", ") : "-";
+  const pathSummary = Array.isArray(item.dataPaths) && item.dataPaths.length > 0 ? item.dataPaths.join(", ") : "-";
   el.panelTitle.textContent = "Reduction";
   el.panelMeta.innerHTML = '<span>' + escapeHtml(fmtDate(item.at)) + '</span>'
     + '<span>request ' + escapeHtml(item.requestId) + '</span>'
-    + '<span>tool ' + escapeHtml(item.toolName || "unknown") + '</span>'
-    + '<span>' + escapeHtml(item.field) + '</span>'
+    + '<span>segments ' + escapeHtml(fmtInt(item.segmentCount || 0)) + '</span>'
     + '<span>model ' + escapeHtml(item.model || item.upstreamModel || "unknown") + '</span>';
   el.stats.innerHTML = [
-    ["Saved chars", fmtInt(item.savedChars)],
-    ["Segment", item.segmentId],
-    ["Item index", fmtInt(item.itemIndex)],
+    ["Saved chars", fmtInt(item.totalSavedChars)],
+    ["Segments", fmtInt(item.segmentCount)],
     ["Passes touched", fmtInt(changedPasses.length)],
-    ["Path", item.dataPath || "-"],
+    ["Tools", toolSummary],
+    ["Routes", routeSummary],
+    ["Paths", pathSummary],
     ...(uxAggregate && uxAggregate.latestCountMode
       ? [["Count mode", countModeMetaLabel(uxAggregate.latestCountMode)]]
       : []),
@@ -812,11 +943,40 @@ function renderReduction(item) {
       ? [["Dominant pass", recentReduction.dominantPass.key]]
       : []),
   ].map(([label, value]) => '<div class="chip">' + escapeHtml(label) + ': ' + escapeHtml(value) + '</div>').join("");
-  el.compareRoot.innerHTML = '<div class="compare">'
-    + '<div class="pane"><div class="pane-label">Before Tool Segment</div><pre>' + escapeHtml(item.beforeText) + '</pre></div>'
-    + '<div class="pane"><div class="pane-label">After Tool Segment</div><pre>' + escapeHtml(item.afterText) + '</pre></div>'
-    + '</div>';
-  el.passRoot.innerHTML = passes.length === 0
+  el.compareRoot.innerHTML = primarySegment
+    ? '<div class="compare">'
+      + '<div class="pane"><div class="pane-label">Before First Segment</div><pre>' + escapeHtml(primarySegment.beforeText) + '</pre></div>'
+      + '<div class="pane"><div class="pane-label">After First Segment</div><pre>' + escapeHtml(primarySegment.afterText) + '</pre></div>'
+      + '</div>'
+    : '<div class="empty">No reduction segments in this call.</div>';
+  const segmentsHtml = segments.length === 0
+    ? ""
+    : '<div class="pass-list">'
+      + visibleSegments.map((segment, index) => {
+        const absoluteIndex = state.reductionSegmentsExpanded ? index : index;
+        const segmentNumber = state.reductionSegmentsExpanded ? index + 1 : 1;
+        const segmentPasses = Array.isArray(segment.report) ? segment.report.filter((entry) => entry && entry.changed) : [];
+        return '<div class="pass-item">'
+          + '<strong>Segment #' + escapeHtml(String(segmentNumber)) + '</strong>'
+          + ' · saved=' + escapeHtml(fmtInt(segment.savedChars))
+          + ' · field=' + escapeHtml(segment.field || "-")
+          + ' · tool=' + escapeHtml(segment.toolName || "-")
+          + '<br />segmentId=' + escapeHtml(segment.segmentId || "-")
+          + ' · itemIndex=' + escapeHtml(fmtInt(segment.itemIndex))
+          + (segment.dataPath ? ' · path=' + escapeHtml(segment.dataPath) : '')
+          + (segment.route ? '<br />route=' + escapeHtml(segment.route) + (segment.routeReason ? ' · reason=' + escapeHtml(segment.routeReason) : '') : '')
+          + '<br />changed passes=' + escapeHtml(fmtInt(segmentPasses.length))
+          + '</div>';
+      }).join("")
+      + (segments.length > 1
+        ? '<button id="toggleReductionSegmentsBtn" class="nav-btn" type="button" style="margin-top:8px;">'
+          + escapeHtml(state.reductionSegmentsExpanded
+            ? 'Show fewer segments'
+            : 'Show all ' + fmtInt(segments.length) + ' segments')
+          + '</button>'
+        : '')
+      + '</div>';
+  const passesHtml = passes.length === 0
     ? ""
     : '<div class="pass-list">' + passes.map((entry) => {
         const saved = Math.max(0, Number(entry.beforeChars || 0) - Number(entry.afterChars || 0));
@@ -830,9 +990,33 @@ function renderReduction(item) {
           + (entry.skippedReason ? ' · skipped=' + escapeHtml(entry.skippedReason) : '')
           + '</div>';
       }).join("") + '</div>';
+  el.passRoot.innerHTML =
+    segmentsHtml
+    + passesHtml
+    + renderCacheAuditPanel(cacheAuditSummary)
+    + renderCacheAuditFingerprintGroups(recentCacheAuditGroups)
+    + renderCacheAuditRecentTable(recentCacheAudit);
+  const toggleSegmentsBtn = document.getElementById("toggleReductionSegmentsBtn");
+  if (toggleSegmentsBtn) {
+    toggleSegmentsBtn.addEventListener("click", () => {
+      state.reductionSegmentsExpanded = !state.reductionSegmentsExpanded;
+      renderActiveView();
+    });
+  }
+  const toggleFingerprintGroupsBtn = document.getElementById("toggleFingerprintGroupsBtn");
+  if (toggleFingerprintGroupsBtn) {
+    toggleFingerprintGroupsBtn.addEventListener("click", () => {
+      state.fingerprintGroupsExpanded = !state.fingerprintGroupsExpanded;
+      renderActiveView();
+    });
+  }
 }
 
 function renderEviction(item) {
+  const data = state.sessionData.get((state.activeHost || "") + "::" + state.activeSessionId) || {};
+  const cacheAuditSummary = data.cacheAuditSummary || null;
+  const recentCacheAudit = data.recentCacheAudit || [];
+  const recentCacheAuditGroups = data.recentCacheAuditGroups || [];
   el.panelTitle.textContent = "Eviction";
   el.panelMeta.innerHTML = '<span>' + escapeHtml(fmtDate(item.at)) + '</span>'
     + '<span>task ' + escapeHtml(item.taskLabel || item.taskId) + '</span>'
@@ -847,9 +1031,21 @@ function renderEviction(item) {
     + '<div class="pane"><div class="pane-label">Before Eviction</div><pre>' + escapeHtml(item.beforeText) + '</pre></div>'
     + '<div class="pane"><div class="pane-label">After Eviction</div><pre>' + escapeHtml(item.afterText) + '</pre></div>'
     + '</div>';
-  el.passRoot.innerHTML = item.archivePath
+  const archiveBlock = item.archivePath
     ? '<div class="pass-list"><div class="pass-item"><strong>Archive</strong><br />' + escapeHtml(item.archivePath) + '</div></div>'
     : "";
+  el.passRoot.innerHTML =
+    archiveBlock
+    + renderCacheAuditPanel(cacheAuditSummary)
+    + renderCacheAuditFingerprintGroups(recentCacheAuditGroups)
+    + renderCacheAuditRecentTable(recentCacheAudit);
+  const toggleFingerprintGroupsBtn = document.getElementById("toggleFingerprintGroupsBtn");
+  if (toggleFingerprintGroupsBtn) {
+    toggleFingerprintGroupsBtn.addEventListener("click", () => {
+      state.fingerprintGroupsExpanded = !state.fingerprintGroupsExpanded;
+      renderActiveView();
+    });
+  }
 }
 
 function renderActiveView() {
@@ -881,6 +1077,14 @@ function renderActiveView() {
   el.prevBtn.disabled = safeIndex <= 0;
   el.nextBtn.disabled = safeIndex >= items.length - 1;
   const item = items[safeIndex];
+  if (state.activeTab !== "reduction") {
+    state.reductionSegmentsExpanded = false;
+  }
+  if (state.activeTab === "reduction") {
+    // Keep current toggle state while paging within reduction calls.
+  } else {
+    state.fingerprintGroupsExpanded = false;
+  }
   if (state.activeTab === "stability") {
     renderStability(item);
   } else if (state.activeTab === "reduction") {
@@ -892,14 +1096,18 @@ function renderActiveView() {
 
 el.tabStability.addEventListener("click", () => {
   state.activeTab = "stability";
+  state.fingerprintGroupsExpanded = false;
   renderActiveView();
 });
 el.tabReduction.addEventListener("click", () => {
   state.activeTab = "reduction";
+  state.reductionSegmentsExpanded = false;
+  state.fingerprintGroupsExpanded = false;
   renderActiveView();
 });
 el.tabEviction.addEventListener("click", () => {
   state.activeTab = "eviction";
+  state.fingerprintGroupsExpanded = false;
   renderActiveView();
 });
 el.prevBtn.addEventListener("click", () => {

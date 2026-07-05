@@ -122,6 +122,11 @@ async function loadVisualHostsSummary(hosts: VisualHostSource[]): Promise<Array<
   charOptimizedTurns: number;
   latestCountMode?: string;
   latestAt: string;
+  cacheWarmCandidates: number;
+  cacheWarmHits: number;
+  cacheWarmMisses: number;
+  cacheHitRatePercent: number;
+  cacheKeyMismatchCount: number;
 }>> {
   const normalized = normalizeVisualHostSources(hosts);
   return Promise.all(normalized.map(async (host) => {
@@ -141,8 +146,19 @@ async function loadVisualHostsSummary(hosts: VisualHostSource[]): Promise<Array<
       charOptimizedTurns: sessions.reduce((sum, session) => sum + Number(session.charOptimizedTurns ?? 0), 0),
       latestCountMode: tokenSavedCount > 0 ? "openai_tokens" : (charSavedCount > 0 ? "chars" : undefined),
       latestAt: sessions.reduce((latest, session) => String(session.lastAt ?? "") > latest ? String(session.lastAt ?? "") : latest, ""),
+      cacheWarmCandidates: sessions.reduce((sum, session) => sum + Number(session.cacheAuditSummary?.warmCandidates ?? 0), 0),
+      cacheWarmHits: sessions.reduce((sum, session) => sum + Number(session.cacheAuditSummary?.warmHits ?? 0), 0),
+      cacheWarmMisses: sessions.reduce((sum, session) => sum + Number(session.cacheAuditSummary?.warmMisses ?? 0), 0),
+      cacheHitRatePercent: 0,
+      cacheKeyMismatchCount: sessions.reduce((sum, session) => sum + Number(session.cacheAuditSummary?.promptCacheKeyMismatchCount ?? 0), 0),
     };
-  }));
+  })).then((hostSummaries) => hostSummaries.map((host) => ({
+    ...host,
+    cacheHitRatePercent:
+      host.cacheWarmCandidates > 0
+        ? Math.round((host.cacheWarmHits / host.cacheWarmCandidates) * 1000) / 10
+        : 0,
+  })));
 }
 
 export async function startMultiHostVisualServer(

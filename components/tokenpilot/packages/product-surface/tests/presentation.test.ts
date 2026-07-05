@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildSessionReportText, formatSessionReport, loadSessionReportData, renderSessionReport } from "../src/presentation.js";
-import { renderVisualPageHtml } from "../src/visual/session-visual-page.js";
+import { renderVisualPageHtml, renderVisualPageScript } from "../src/visual/session-visual-page.js";
 
 test("formatSessionReport prefers char aggregates when latest mode is chars", () => {
   const text = formatSessionReport({
@@ -25,6 +25,16 @@ test("formatSessionReport prefers char aggregates when latest mode is chars", ()
       },
     },
     detailsEnabled: true,
+    cacheAuditSummary: {
+      warmCandidates: 2,
+      warmHits: 1,
+      warmMisses: 1,
+      hitRatePercent: 50,
+      responsePromptCacheKeyRewriteCount: 3,
+      promptCacheKeyMismatchCount: 3,
+      topEntropyKinds: [{ key: "abs_path", count: 2 }],
+      topDriftKeys: [{ key: "instructions", count: 1 }],
+    },
   });
 
   assert.match(text, /saved chars: 162,795/);
@@ -33,6 +43,11 @@ test("formatSessionReport prefers char aggregates when latest mode is chars", ()
   assert.match(text, /avg saved chars per optimized turn: 81,398/);
   assert.match(text, /latest request savings: 80,000 chars/);
   assert.match(text, /latest response savings: 1,397 chars/);
+  assert.match(text, /cache warm hits: 1\/2 \(50%\)/);
+  assert.match(text, /cache warm misses: 1/);
+  assert.match(text, /response cache key rewrites: 3/);
+  assert.match(text, /cache entropy hotspots: abs_path=2/);
+  assert.match(text, /cache drift hotspots: instructions=1/);
 });
 
 test("formatSessionReport falls back to token aggregates when latest mode is unset", () => {
@@ -71,6 +86,29 @@ test("renderVisualPageHtml includes core visual navigation structure", () => {
   assert.match(html, /overviewRoot/);
   assert.match(html, /compare/);
   assert.match(html, /hostSelect/);
+  assert.match(html, /app\.js/);
+});
+
+test("renderVisualPageScript includes cache audit detail panel labels", () => {
+  const script = renderVisualPageScript();
+
+  assert.match(script, /Cache Audit/);
+  assert.match(script, /Fingerprint Group #/);
+  assert.match(script, /Recent Cache Request #/);
+  assert.match(script, /No reduction segments in this call/);
+  assert.match(script, /Before First Segment/);
+  assert.match(script, /Segment #/);
+  assert.match(script, /Show all /);
+  assert.match(script, /Show fewer segments/);
+  assert.match(script, /Show all .* fingerprint groups/);
+  assert.match(script, /Show fewer fingerprint groups/);
+  assert.match(script, / · latest/);
+  assert.match(script, /response key rewrites=/);
+  assert.match(script, /fingerprint=/);
+  assert.match(script, /request key=/);
+  assert.match(script, /cached tokens=/);
+  assert.match(script, /entropy hotspots=/);
+  assert.match(script, /drift hotspots=/);
 });
 
 test("buildSessionReportText renders empty-state reports with overview", () => {

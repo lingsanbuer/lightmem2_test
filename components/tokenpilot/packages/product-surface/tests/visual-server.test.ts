@@ -167,6 +167,42 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
       }, null, 2)}\n`,
       "utf8",
     );
+    await writeFile(
+      join(codexStateDir, "cache-audit.jsonl"),
+      [
+        JSON.stringify({
+          at: "2026-06-29T11:00:00.000Z",
+          sessionId: "codex-session-1",
+          model: "gpt-5.4-mini",
+          stream: false,
+          stablePrefixFingerprint: "fp-codex-1",
+          stablePrefix: { schemaVersion: 1, stableCore: [], semiStableContext: [] },
+          entropyFindings: [{ kind: "abs_path", segmentKey: "instructions", layer: "stable_core", detail: "path" }],
+          driftReasons: [{ kind: "segment_text_changed", key: "instructions", detail: "changed" }],
+          requestPromptCacheKey: "pk-codex-1",
+          responsePromptCacheKey: "pk-codex-1",
+          cachedInputTokens: 0,
+          usage: { input_tokens: 100 },
+          status: 200,
+        }),
+        JSON.stringify({
+          at: "2026-06-29T11:01:00.000Z",
+          sessionId: "codex-session-1",
+          model: "gpt-5.4-mini",
+          stream: false,
+          stablePrefixFingerprint: "fp-codex-1",
+          stablePrefix: { schemaVersion: 1, stableCore: [], semiStableContext: [] },
+          entropyFindings: [{ kind: "uuid", segmentKey: "instructions", layer: "stable_core", detail: "uuid" }],
+          driftReasons: [{ kind: "segment_text_changed", key: "tools", detail: "changed" }],
+          requestPromptCacheKey: "pk-codex-1",
+          responsePromptCacheKey: "pk-codex-2",
+          cachedInputTokens: 64,
+          usage: { input_tokens: 100, input_tokens_details: { cached_tokens: 64 } },
+          status: 200,
+        }),
+      ].join("\n"),
+      "utf8",
+    );
 
     const handle = await startMultiHostVisualServer([
       {
@@ -194,6 +230,8 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
           tokenSavedCount: number;
           charSavedCount: number;
           latestAt: string;
+          cacheWarmCandidates: number;
+          cacheWarmHits: number;
         }>;
       };
       assert.deepEqual(
@@ -213,6 +251,9 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
       );
       assert.equal(hostsPayload.hosts[0]?.latestAt, "2026-06-29T11:00:00.000Z");
       assert.equal(hostsPayload.hosts[1]?.latestAt, "2026-06-29T10:00:00.000Z");
+      assert.equal(hostsPayload.hosts[0]?.cacheWarmHits, 1);
+      assert.equal(hostsPayload.hosts[0]?.cacheWarmCandidates, 1);
+      assert.equal(hostsPayload.hosts[1]?.cacheWarmCandidates, 0);
 
       const openclawSessionsResp = await fetch(`${handle.url}/api/sessions?host=openclaw`);
       const openclawSessionsPayload = await openclawSessionsResp.json() as {
@@ -228,9 +269,26 @@ test("multi-host visual server exposes hosts and host-scoped sessions", async ()
       const codexSessionPayload = await codexSessionResp.json() as {
         sessionId: string;
         reduction: Array<{ beforeText: string; afterText: string }>;
+        cacheAuditSummary?: {
+          warmHits: number;
+          warmCandidates: number;
+          responsePromptCacheKeyRewriteCount: number;
+        };
+        recentCacheAudit?: Array<{
+          cachedInputTokens: number;
+          requestPromptCacheKey: string | null;
+          responsePromptCacheKey: string | null;
+        }>;
       };
       assert.equal(codexSessionPayload.sessionId, "codex-session-1");
       assert.equal(codexSessionPayload.reduction[0]?.beforeText, "before-codex");
+      assert.equal(codexSessionPayload.cacheAuditSummary?.warmHits, 1);
+      assert.equal(codexSessionPayload.cacheAuditSummary?.warmCandidates, 1);
+      assert.equal(codexSessionPayload.cacheAuditSummary?.responsePromptCacheKeyRewriteCount, 1);
+      assert.equal(codexSessionPayload.recentCacheAudit?.length, 2);
+      assert.equal(codexSessionPayload.recentCacheAudit?.[0]?.cachedInputTokens, 64);
+      assert.equal(codexSessionPayload.recentCacheAudit?.[0]?.requestPromptCacheKey, "pk-codex-1");
+      assert.equal(codexSessionPayload.recentCacheAudit?.[0]?.responsePromptCacheKey, "pk-codex-2");
     } finally {
       await new Promise<void>((resolve) => handle.server.close(() => resolve()));
     }
