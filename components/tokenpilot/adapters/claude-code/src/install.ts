@@ -12,6 +12,7 @@ import {
 import {
   CLAUDE_TOOL_SEARCH_DEFAULT,
   CLAUDE_TOOL_SEARCH_ENV,
+  defaultClaudeUpstreamBaseUrl,
   defaultClaudeCodeMcpConfigPath,
   defaultClaudeCodeSettingsPath,
   defaultTokenPilotClaudeCodeConfigPath,
@@ -126,6 +127,21 @@ function upsertHookGroup(groups: unknown, group: Record<string, unknown>): Recor
   return filtered;
 }
 
+function shouldAdoptSettingsUpstream(
+  currentUpstreamBaseUrl: string,
+  settingsUpstreamBaseUrl: string,
+  proxyBaseUrl: string,
+): boolean {
+  const normalizedCurrent = currentUpstreamBaseUrl.trim().replace(/\/+$/, "");
+  const normalizedSettings = settingsUpstreamBaseUrl.trim().replace(/\/+$/, "");
+  const normalizedProxy = proxyBaseUrl.trim().replace(/\/+$/, "");
+  const normalizedDefault = defaultClaudeUpstreamBaseUrl().replace(/\/+$/, "");
+  if (!normalizedSettings || normalizedSettings === normalizedProxy) {
+    return false;
+  }
+  return !normalizedCurrent || normalizedCurrent === normalizedDefault;
+}
+
 export async function installClaudeCodeTokenPilot(params?: {
   settingsPath?: string;
   tokenPilotConfigPath?: string;
@@ -167,17 +183,24 @@ export async function installClaudeCodeTokenPilot(params?: {
   const tokenPilotConfigPath = params?.tokenPilotConfigPath ?? defaultTokenPilotClaudeCodeConfigPath();
   const config = await loadTokenPilotClaudeCodeConfig(tokenPilotConfigPath);
   const commandSkillsDir = defaultClaudeCodeSkillBridgeDir(settingsPath);
-  await writeTokenPilotClaudeCodeConfig(config, tokenPilotConfigPath);
-  const mcpServer = resolveClaudeCodeMcpServerSpecForInstall(config.stateDir);
-  const mcpProbeServer = resolveClaudeCodeMcpServerSpecForProbe(config.stateDir);
-
   const existing = existsSync(settingsPath)
     ? JSON.parse(await readFile(settingsPath, "utf8"))
     : {};
   const root = asRecord(existing);
+  const existingEnv = asRecord(root.env);
+  const existingAnthropicBaseUrl = typeof existingEnv.ANTHROPIC_BASE_URL === "string"
+    ? existingEnv.ANTHROPIC_BASE_URL.trim()
+    : "";
+  const proxyBaseUrl = proxyBaseUrlForPort(config.proxyPort);
+  if (shouldAdoptSettingsUpstream(config.upstreamBaseUrl, existingAnthropicBaseUrl, proxyBaseUrl)) {
+    config.upstreamBaseUrl = existingAnthropicBaseUrl.replace(/\/+$/, "");
+  }
+  await writeTokenPilotClaudeCodeConfig(config, tokenPilotConfigPath);
+  const mcpServer = resolveClaudeCodeMcpServerSpecForInstall(config.stateDir);
+  const mcpProbeServer = resolveClaudeCodeMcpServerSpecForProbe(config.stateDir);
   const env = {
-    ...asRecord(root.env),
-    ANTHROPIC_BASE_URL: proxyBaseUrlForPort(config.proxyPort),
+    ...existingEnv,
+    ANTHROPIC_BASE_URL: proxyBaseUrl,
     [CLAUDE_TOOL_SEARCH_ENV]: CLAUDE_TOOL_SEARCH_DEFAULT,
   };
   const hooks = asRecord(root.hooks);
@@ -261,7 +284,7 @@ export async function installClaudeCodeTokenPilot(params?: {
     settingsPath,
     mcpConfigPath,
     tokenPilotConfigPath,
-    proxyBaseUrl: proxyBaseUrlForPort(config.proxyPort),
+    proxyBaseUrl,
     stateDir: config.stateDir,
     settingsBackedUp,
     mcpConfigBackedUp,

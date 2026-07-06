@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { readCliContextState } from "../../../products/cli/src/context-store.js";
 import { installClaudeCodeTokenPilot, resolveClaudeCodeHookCommandForInstall } from "../src/install.js";
+import { proxyBaseUrlForPort } from "../src/config.js";
 
 test("installClaudeCodeTokenPilot writes settings, MCP config, and backups existing files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-install-"));
@@ -133,6 +134,71 @@ test("installClaudeCodeTokenPilot honors custom environment-configured paths", a
     else process.env.CLAUDE_CODE_MCP_CONFIG_PATH = originalMcpConfigPath;
     if (originalTokenPilotConfigPath === undefined) delete process.env.TOKENPILOT_CLAUDE_CODE_CONFIG;
     else process.env.TOKENPILOT_CLAUDE_CODE_CONFIG = originalTokenPilotConfigPath;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("installClaudeCodeTokenPilot preserves custom Claude upstream from settings", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-install-custom-upstream-"));
+  try {
+    const settingsPath = join(dir, "settings.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+    await writeFile(
+      settingsPath,
+      `${JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic" } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await installClaudeCodeTokenPilot({
+      settingsPath,
+      mcpConfigPath: join(dir, ".claude.json"),
+      tokenPilotConfigPath,
+      probeMcp: false,
+    });
+
+    const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
+      env?: Record<string, string>;
+    };
+    assert.equal(settings.env?.ANTHROPIC_BASE_URL, proxyBaseUrlForPort(17668));
+
+    const tokenPilotConfig = JSON.parse(await readFile(tokenPilotConfigPath, "utf8")) as {
+      upstreamBaseUrl?: string;
+    };
+    assert.equal(tokenPilotConfig.upstreamBaseUrl, "https://api.deepseek.com/anthropic");
+    assert.equal(result.proxyBaseUrl, proxyBaseUrlForPort(17668));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("installClaudeCodeTokenPilot does not override an explicit TokenPilot upstream", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lightmem2-claude-install-keep-upstream-"));
+  try {
+    const settingsPath = join(dir, "settings.json");
+    const tokenPilotConfigPath = join(dir, "tokenpilot.json");
+    await writeFile(
+      settingsPath,
+      `${JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic" } }, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(
+      tokenPilotConfigPath,
+      `${JSON.stringify({ upstreamBaseUrl: "https://custom.gateway.example/v1/messages" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await installClaudeCodeTokenPilot({
+      settingsPath,
+      mcpConfigPath: join(dir, ".claude.json"),
+      tokenPilotConfigPath,
+      probeMcp: false,
+    });
+
+    const tokenPilotConfig = JSON.parse(await readFile(tokenPilotConfigPath, "utf8")) as {
+      upstreamBaseUrl?: string;
+    };
+    assert.equal(tokenPilotConfig.upstreamBaseUrl, "https://custom.gateway.example/v1/messages");
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
